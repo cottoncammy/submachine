@@ -1,0 +1,14 @@
+.{
+    .name = .sdl_shadercross,
+    .version = "3.0.0",
+    .dependencies = .{
+        .sdl = .{
+            .url = "git+https://github.com/allyourcodebase/SDL3#af9c32ce4824e0ad4337447434c40f2b672faf94",
+            .hash = "sdl-0.0.0-i4QD0btgqAABajEXrQnyZr1xVsk7LM48w2nBmuQ5gdfr",
+            .lazy = true,
+        },
+        .spirv_cross = .{.path = "../spirv-cross", .lazy = true },
+        .directx_shader_compiler = .{.path = "../directx-shader-compiler", .lazy = true },
+    },
+    .paths = .{""},
+}

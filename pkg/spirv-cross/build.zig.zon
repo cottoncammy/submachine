@@ -1,0 +1,5 @@
+.{
+    .name = .spirv_cross,
+    .version = "1.0.0",
+    .paths = .{""},
+}
