@@ -118,10 +118,10 @@ pub fn perspective(
     near: f32,
     far: f32,
 ) [4][4]f32 {
-    const tan_half_radians = @tan(radians / 2);
+    const tan_half_theta = @tan(radians / 2);
     var result = std.mem.zeroes([4][4]f32);
-    result[0][0] = 1 / (aspect_ratio * tan_half_radians);
-    result[1][1] = 1 / tan_half_radians;
+    result[0][0] = 1 / (aspect_ratio * tan_half_theta);
+    result[1][1] = 1 / tan_half_theta;
     result[2][2] = far / (near - far);
     result[2][3] = -(far * near) / (far - near);
     result[3][2] = -1;

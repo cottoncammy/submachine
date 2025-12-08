@@ -6,10 +6,40 @@ const Allocator = std.mem.Allocator;
 
 const c = @import("root.zig").c;
 
+pub const max_shaders_len = 2;
+pub const max_textures_len = 1;
+
 const max_file_len = 500 * 1024;
 
-const max_shaders_len = 2;
-const max_textures_len = 1;
+pub const ShaderInfo = struct {
+    json_offset: usize,
+    json_len: usize,
+    json_comp_len: usize,
+    spv_offset: usize,
+    spv_len: usize,
+    spv_comp_len: usize,
+};
+
+pub const AssetInfo = struct {
+    offset: usize,
+    len: usize,
+};
+
+pub const ShaderIndex = enum(u8) {
+    sprite_vert = (0 << 1) | 0,
+    solid_color_frag = (1 << 1) | 1,
+};
+
+pub const TextureIndex = enum {
+    bricks,
+};
+
+pub const ShaderJson = struct {
+    samplers: c_uint,
+    storage_textures: c_uint,
+    storage_buffers: c_uint,
+    uniform_buffers: c_uint,
+};
 
 const ManifestEntryJson = struct {
     name: []const u8,
@@ -24,48 +54,30 @@ const AssetType = enum {
     texture_png,
 };
 
-pub const ShaderInfo = struct {
-    json_offset: usize,
-    json_len: usize,
-    json_comp_len: usize,
-    spv_offset: usize,
-    spv_len: usize,
-    spv_comp_len: usize,
-};
-
-pub const TextureInfo = struct {
-    offset: usize,
-    len: usize,
-};
-
-pub const ShaderIndex = enum(u8) {
-    triangle_vert = (0 << 1) | 0,
-    color_frag = (1 << 1) | 1,
-};
-
-pub const TextureIndex = enum {
-    bricks,
-};
-
 file_map: []align(std.heap.page_size_min) const u8,
+
 shaders_lut: []?*ShaderInfo,
-textures_lut: []?*TextureInfo,
+textures_lut: []?*AssetInfo,
 
 const Self = @This();
 
 pub fn init(gpa: Allocator) !Self {
-    var state = std.mem.zeroes(Self);
-    state.shaders_lut = try gpa.alloc(?*ShaderInfo, max_shaders_len);
-    errdefer gpa.free(state.shaders_lut);
-    @memset(state.shaders_lut, null);
+    var self: Self = .{
+        .file_map = &.{},
+        .shaders_lut = &.{},
+        .textures_lut = &.{},
+    };
 
-    state.textures_lut = try gpa.alloc(?*TextureInfo, max_textures_len);
-    @memset(state.textures_lut, null);
-    return state;
+    self.shaders_lut = try gpa.alloc(?*ShaderInfo, max_shaders_len);
+    errdefer gpa.free(self.shaders_lut);
+    @memset(self.shaders_lut, null);
+
+    self.textures_lut = try gpa.alloc(?*AssetInfo, max_textures_len);
+    @memset(self.textures_lut, null);
+    return self;
 }
 
 pub fn deinit(self: *Self, gpa: Allocator) void {
-    self.munmapAssetsPack();
     for (self.textures_lut) |opt_textureinfo| {
         if (opt_textureinfo) |textureinfo| {
             gpa.destroy(textureinfo);
@@ -81,7 +93,7 @@ pub fn deinit(self: *Self, gpa: Allocator) void {
     gpa.free(self.shaders_lut);
 }
 
-fn munmapAssetsPack(self: *Self) void {
+pub fn munmapAssetsPack(self: *Self) void {
     std.posix.munmap(self.file_map);
 }
 
@@ -92,6 +104,7 @@ pub fn parseAssetsManifest(self: *Self, gpa: Allocator) !void {
     defer gpa.free(assets_pack_path);
 
     try self.mmapAssetsPack(assets_pack_path);
+    errdefer self.munmapAssetsPack();
 
     const manifest_path = try std.fs.path.join(gpa, &.{ assets_path, "manifest.json" });
     defer gpa.free(manifest_path);
@@ -116,7 +129,9 @@ pub fn parseAssetsManifest(self: *Self, gpa: Allocator) !void {
 
         const asset_type = try getAssetType(name);
         switch (asset_type) {
-            .shader_json, .shader_spv => {
+            .shader_json,
+            .shader_spv,
+            => {
                 const shaderidx = try getShaderIndex(name);
                 const shaderinfo = self.getShaderInfo(gpa, shaderidx) catch |err| {
                     log.err(
@@ -151,6 +166,107 @@ pub fn parseAssetsManifest(self: *Self, gpa: Allocator) !void {
             },
         }
     }
+}
+
+pub fn readShaderCode(
+    self: *Self,
+    gpa: Allocator,
+    shaderidx: ShaderIndex,
+    format: c_uint,
+) ![:0]u8 {
+    const idx = @intFromEnum(shaderidx) >> 1;
+    std.debug.assert(self.shaders_lut.len > idx);
+    const shaderinfo = self.shaders_lut[idx].?;
+
+    var offset: usize = 0;
+    var len: usize = 0;
+    var comp_len: usize = 0;
+    if (format == c.SDL_GPU_SHADERFORMAT_SPIRV) {
+        offset = shaderinfo.spv_offset;
+        len = shaderinfo.spv_len;
+        comp_len = shaderinfo.spv_comp_len;
+    } else {
+        unreachable;
+    }
+
+    const code = try gpa.allocSentinel(u8, len, 0);
+    errdefer gpa.free(code);
+
+    const result = c.LZ4_decompress_safe(
+        @ptrCast(self.file_map[offset .. offset + comp_len]),
+        code.ptr,
+        @intCast(comp_len),
+        @intCast(len),
+    );
+    if (result == 0) {
+        log.err("Failed to decompress shader code", .{});
+        return error.LZ4Decompress;
+    }
+    return code;
+}
+
+pub fn readShaderJson(
+    self: *Self,
+    gpa: Allocator,
+    shaderidx: ShaderIndex,
+) !std.json.Parsed(ShaderJson) {
+    const idx = @intFromEnum(shaderidx) >> 1;
+    std.debug.assert(self.shaders_lut.len > idx);
+    const shaderinfo = self.shaders_lut[idx].?;
+
+    const offset = shaderinfo.json_offset;
+    const len = shaderinfo.json_len;
+    const comp_len = shaderinfo.json_comp_len;
+
+    const buf = try gpa.allocSentinel(u8, len, 0);
+    defer gpa.free(buf);
+
+    const result = c.LZ4_decompress_safe(
+        @ptrCast(self.file_map[offset .. offset + comp_len]),
+        buf.ptr,
+        @intCast(comp_len),
+        @intCast(len),
+    );
+    if (result == 0) {
+        log.err("Failed to decompress shader json", .{});
+        return error.LZ4Decompress;
+    }
+
+    return try std.json.parseFromSlice(
+        ShaderJson,
+        gpa,
+        buf,
+        .{ .ignore_unknown_fields = true },
+    );
+}
+
+pub fn readTexture(
+    self: *Self,
+    gpa: Allocator,
+    textureidx: TextureIndex,
+    width: *c_int,
+    height: *c_int,
+    channels: *c_int,
+) ![*c]u8 {
+    const idx = @intFromEnum(textureidx);
+    std.debug.assert(self.textures_lut.len > idx);
+    const textureinfo = self.textures_lut[idx].?;
+
+    const buf = try gpa.alloc(u8, textureinfo.len);
+    defer gpa.free(buf);
+    @memcpy(
+        buf,
+        self.file_map[textureinfo.offset .. textureinfo.offset + textureinfo.len],
+    );
+
+    return c.stbi_load_from_memory(
+        buf.ptr,
+        @intCast(buf.len),
+        width,
+        height,
+        channels,
+        0,
+    );
 }
 
 fn getAssetsPath(gpa: Allocator) ![]const u8 {
@@ -219,14 +335,24 @@ fn getShaderInfo(self: *Self, gpa: Allocator, shaderidx: u8) !*ShaderInfo {
 
 fn getShaderIndex(fname: []const u8) !u8 {
     const stem = std.fs.path.stem(fname);
-    if (std.mem.eql(u8, stem, "triangle.vert")) {
-        return @intFromEnum(ShaderIndex.triangle_vert) >> 1;
-    } else if (std.mem.eql(u8, stem, "color.frag")) {
-        return @intFromEnum(ShaderIndex.color_frag) >> 1;
+    if (std.mem.eql(u8, stem, "sprite.vert")) {
+        return @intFromEnum(ShaderIndex.sprite_vert) >> 1;
+    } else if (std.mem.eql(u8, stem, "solid_color.frag")) {
+        return @intFromEnum(ShaderIndex.solid_color_frag) >> 1;
     } else {
         log.err("Unexpected shader name {s}", .{fname});
         return error.ShaderName;
     }
+}
+
+fn getTextureInfo(self: *Self, gpa: Allocator, textureidx: TextureIndex) !*AssetInfo {
+    const idx = @intFromEnum(textureidx);
+    if (self.textures_lut.len <= idx or self.textures_lut[idx] == null) {
+        const textureinfo = try gpa.create(AssetInfo);
+        textureinfo.* = std.mem.zeroes(AssetInfo);
+        self.textures_lut[idx] = textureinfo;
+    }
+    return self.textures_lut[idx] orelse unreachable;
 }
 
 fn getTextureIndex(fname: []const u8) !TextureIndex {
@@ -237,43 +363,4 @@ fn getTextureIndex(fname: []const u8) !TextureIndex {
         log.err("Unexpected texture name {s}", .{fname});
         return error.ShaderName;
     }
-}
-
-fn getTextureInfo(self: *Self, gpa: Allocator, textureidx: TextureIndex) !*TextureInfo {
-    const idx = @intFromEnum(textureidx);
-    if (self.textures_lut.len <= idx or self.textures_lut[idx] == null) {
-        const textureinfo = try gpa.create(TextureInfo);
-        textureinfo.* = std.mem.zeroes(TextureInfo);
-        self.textures_lut[idx] = textureinfo;
-    }
-    return self.textures_lut[idx] orelse unreachable;
-}
-
-pub fn readTexture(
-    self: *Self,
-    gpa: std.mem.Allocator,
-    textureidx: TextureIndex,
-    width: *c_int,
-    height: *c_int,
-    channels: *c_int,
-) ![*c]u8 {
-    const idx = @intFromEnum(textureidx);
-    std.debug.assert(self.textures_lut.len > idx);
-    const textureinfo = self.textures_lut[idx].?;
-    const buf = try gpa.alloc(u8, textureinfo.len);
-    defer gpa.free(buf);
-
-    @memcpy(
-        buf,
-        self.file_map[textureinfo.offset .. textureinfo.offset + textureinfo.len],
-    );
-
-    return c.stbi_load_from_memory(
-        buf.ptr,
-        @intCast(buf.len),
-        width,
-        height,
-        channels,
-        0,
-    );
 }
