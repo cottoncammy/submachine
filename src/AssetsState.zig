@@ -6,9 +6,10 @@ const Allocator = std.mem.Allocator;
 
 const c = @import("root.zig").c;
 
-pub const max_shaders_len = 2;
-pub const max_textures_len = 1;
+pub const max_shaders_len = 10;
+pub const max_textures_len = 10;
 
+// TODO
 const max_file_len = 500 * 1024;
 
 pub const ShaderInfo = struct {
@@ -32,6 +33,7 @@ pub const ShaderIndex = enum(u8) {
 
 pub const TextureIndex = enum {
     bricks,
+    stone,
 };
 
 pub const ShaderJson = struct {
@@ -359,6 +361,8 @@ fn getTextureIndex(fname: []const u8) !TextureIndex {
     const stem = std.fs.path.stem(fname);
     if (std.mem.eql(u8, stem, "bricks")) {
         return .bricks;
+    } else if (std.mem.eql(u8, stem, "stone")) {
+        return .stone;
     } else {
         log.err("Unexpected texture name {s}", .{fname});
         return error.ShaderName;

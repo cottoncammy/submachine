@@ -11,7 +11,7 @@ const ShaderIndex = AssetsState.ShaderIndex;
 const TextureIndex = AssetsState.TextureIndex;
 
 const max_textures_len = AssetsState.max_textures_len;
-const max_materials_len = 1;
+const max_materials_len = 10;
 
 pub const PipelineDesc = struct {
     vert_shader: ShaderIndex,
@@ -42,8 +42,9 @@ pub const SamplerDesc = struct {
     props: c.SDL_PropertiesID,
 };
 
-const MaterialIndex = enum {
-    sprite,
+pub const MaterialIndex = enum {
+    bricks,
+    stone,
 };
 
 const Self = @This();
@@ -244,13 +245,8 @@ pub fn createMaterial(
 pub fn getMaterial(self: *Self, material_idx: MaterialIndex) !*Material {
     const idx = @intFromEnum(material_idx);
     std.debug.assert(self.materials.len > idx);
-    const material = self.materials[idx];
-    return material.?;
+    return self.materials[idx].?;
 }
-
-pub fn push() void {}
-
-pub fn drain() void {}
 
 fn getPipelineCreateInfo(desc: PipelineDesc) c.SDL_GPUGraphicsPipelineCreateInfo {
     var createinfo = std.mem.zeroes(c.SDL_GPUGraphicsPipelineCreateInfo);

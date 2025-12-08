@@ -1,4 +1,5 @@
 const std = @import("std");
+const Allocator = std.mem.Allocator;
 const log = std.log.scoped(.root);
 
 const gpu = @import("gpu.zig");
@@ -8,6 +9,7 @@ const GpuState = @import("GpuState.zig");
 const hash_map = @import("hash_map.zig");
 const Material = @import("Material.zig");
 const AssetsState = @import("AssetsState.zig");
+const RenderState = @import("RenderState.zig");
 
 pub const c = @cImport({
     @cInclude("SDL3/SDL.h");
@@ -23,12 +25,13 @@ pub const State = struct {
     device: *c.SDL_GPUDevice,
     assets_state: *AssetsState,
     gpu_state: *GpuState,
+    render_state: *RenderState,
     storage_buf: *c.SDL_GPUBuffer,
     transfer_buf: *c.SDL_GPUTransferBuffer,
     camera: *Camera,
 };
 
-const Sprite = struct {
+const SpriteInstance = extern struct {
     pos: [3]f32,
     rotation: f32,
     color: [4]f32,
@@ -118,7 +121,7 @@ pub fn main() !void {
     // buffers
     const storage_buf_info = c.SDL_GPUBufferCreateInfo{
         .usage = c.SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ,
-        .size = @sizeOf(Sprite) * 1,
+        .size = @sizeOf(SpriteInstance) * max_sprites,
     };
 
     state.storage_buf = try gpu.createBuffer(state.device, &storage_buf_info);
@@ -126,7 +129,7 @@ pub fn main() !void {
 
     const transfer_buf_info = c.SDL_GPUTransferBufferCreateInfo{
         .usage = c.SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
-        .size = @sizeOf(Sprite) * 1,
+        .size = @sizeOf(SpriteInstance) * max_sprites,
     };
 
     state.transfer_buf = try gpu.createTransferBuffer(state.device, &transfer_buf_info);
@@ -142,15 +145,30 @@ pub fn main() !void {
         .address_mode_w = c.SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE,
     });
 
-    // material
+    // materials
     try state.gpu_state.createMaterial(
-        .sprite,
+        .bricks,
         pipeline_desc,
         .bricks,
         sampler_desc,
         @sizeOf(f32) * 32,
     );
 
+    try state.gpu_state.createMaterial(
+        .stone,
+        pipeline_desc,
+        .stone,
+        sampler_desc,
+        @sizeOf(f32) * 32,
+    );
+
+    // render state
+    state.render_state = try allocator.create(RenderState);
+    defer allocator.destroy(state.render_state);
+    state.render_state.* = try RenderState.init(allocator);
+    defer state.render_state.deinit(allocator);
+
+    // camera
     state.camera = try allocator.create(Camera);
     defer allocator.destroy(state.camera);
     state.camera.* = .init(.{ 960, 600 });
@@ -173,11 +191,39 @@ pub fn main() !void {
             }
         }
 
-        try render(state);
+        state.render_state.clearDrawQueue();
+
+        try state.render_state.pushDraw(
+            allocator,
+            .{
+                .sprite = .{
+                    .material = .stone,
+                    .pos = .{ -0.5, -0.5, 0 },
+                    .rotation = 0,
+                    .color = .{ 0, 1, 0, 1 },
+                    .size = .{ 1, 1 },
+                },
+            },
+        );
+
+        try state.render_state.pushDraw(
+            allocator,
+            .{
+                .sprite = .{
+                    .material = .bricks,
+                    .pos = .{ -1, -1, 0 },
+                    .rotation = 0,
+                    .color = .{ 1, 1, 1, 1 },
+                    .size = .{ 0.25, 0.25 },
+                },
+            },
+        );
+
+        try render(state, allocator);
     }
 }
 
-fn render(state: *State) !void {
+fn render(state: *State, gpa: Allocator) !void {
     const cmdbuf = try gpu.acquireCommandBuffer(state.device);
     var opt_swapchain: ?*c.SDL_GPUTexture = null;
     if (!c.SDL_WaitAndAcquireGPUSwapchainTexture(cmdbuf, state.window, &opt_swapchain,
@@ -187,7 +233,10 @@ null, null)) {
     }
 
     if (opt_swapchain) |swapchain| {
-        const transfer_data: [*]Sprite =
+        const batches = try state.render_state.buildBatches(gpa);
+        defer gpa.free(batches);
+
+        const transfer_data: [*]SpriteInstance =
             @ptrCast(@alignCast(c.SDL_MapGPUTransferBuffer(
                 state.device,
                 state.transfer_buf,
@@ -195,11 +244,19 @@ null, null)) {
             )));
         defer c.SDL_UnmapGPUTransferBuffer(state.device, state.transfer_buf);
 
-        transfer_data[0] = std.mem.zeroInit(Sprite, .{
-            .pos = .{ -0.5, -0.5, 0 },
-            .color = .{ 0, 1, 0, 1 },
-            .size = .{ 1, 1 },
-        });
+        const cmds = state.render_state.draw_queue.items;
+        for (cmds, 0..) |cmd, i| {
+            switch (cmd) {
+                .sprite => |sprite| {
+                    transfer_data[i] = std.mem.zeroInit(SpriteInstance, .{
+                        .pos = sprite.pos,
+                        .rotation = sprite.rotation,
+                        .color = sprite.color,
+                        .size = sprite.size,
+                    });
+                },
+            }
+        }
 
         const copypass = try gpu.beginCopyPass(cmdbuf);
         c.SDL_UploadToGPUBuffer(
@@ -211,11 +268,10 @@ null, null)) {
             &.{
                 .buffer = state.storage_buf,
                 .offset = 0,
-                .size = @sizeOf(Sprite) * 1,
+                .size = @sizeOf(SpriteInstance) * @as(u32, @intCast(cmds.len)),
             },
             true,
         );
-
         c.SDL_EndGPUCopyPass(copypass);
 
         const color_target_info = std.mem.zeroInit(c.SDL_GPUColorTargetInfo, .{
@@ -231,8 +287,6 @@ null, null)) {
             return error.GPUDevice;
         }
 
-        const triangle = try state.gpu_state.getMaterial(.sprite);
-        c.SDL_BindGPUGraphicsPipeline(renderpass, triangle.pipeline);
         c.SDL_BindGPUVertexStorageBuffers(
             renderpass,
             0,
@@ -240,31 +294,43 @@ null, null)) {
             1,
         );
 
-        c.SDL_BindGPUFragmentSamplers(
-            renderpass,
-            0,
-            &.{
-                .texture = triangle.texture,
-                .sampler = triangle.sampler,
-            },
-            1,
-        );
+        for (batches) |batch| {
+            const material = try state.gpu_state.getMaterial(batch.material);
+            c.SDL_BindGPUGraphicsPipeline(renderpass, material.pipeline);
 
-        const u_view = state.camera.viewMatrix();
-        triangle.writeMat4(mat4.flatten(u_view), 0);
-        const u_proj = state.camera.projMatrix();
-        triangle.writeMat4(mat4.flatten(u_proj), 1);
+            c.SDL_BindGPUFragmentSamplers(
+                renderpass,
+                0,
+                &.{
+                    .texture = material.texture,
+                    .sampler = material.sampler,
+                },
+                1,
+            );
 
-        const u_buf = triangle.uniform_buf;
-        const stride = @sizeOf(f32) * 16;
-        c.SDL_PushGPUVertexUniformData(
-            cmdbuf,
-            0,
-            @ptrCast(u_buf.ptr),
-            stride * 2,
-        );
+            const u_view = state.camera.viewMatrix();
+            material.writeMat4(mat4.flatten(u_view), 0);
+            const u_proj = state.camera.projMatrix();
+            material.writeMat4(mat4.flatten(u_proj), 1);
 
-        c.SDL_DrawGPUPrimitives(renderpass, 6, 1, 0, 0);
+            const u_buf = material.uniform_buf;
+            const stride = @sizeOf(f32) * 16;
+            c.SDL_PushGPUVertexUniformData(
+                cmdbuf,
+                0,
+                @ptrCast(u_buf.ptr),
+                stride * 2,
+            );
+
+            c.SDL_DrawGPUPrimitives(
+                renderpass,
+                @intCast(6 * batch.count),
+                1,
+                @intCast(6 * batch.base),
+                0,
+            );
+        }
+
         c.SDL_EndGPURenderPass(renderpass);
     }
 

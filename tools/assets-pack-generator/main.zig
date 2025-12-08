@@ -7,7 +7,8 @@ const c = @cImport({
     @cInclude("lz4.h");
 });
 
-const max_file_len = 500 * 1024;
+// TODO
+const max_file_len = 2 * 1024 * 1024;
 
 pub fn main() !void {
     var gpa: std.heap.DebugAllocator(.{}) = .init;
@@ -25,7 +26,7 @@ pub fn main() !void {
     // assets.pak
     var assets = try dir.createFile("assets.pak", .{});
     defer assets.close();
-    const assets_buf = try allocator.alloc(u8, 1024);
+    const assets_buf = try allocator.alloc(u8, 2048);
     defer allocator.free(assets_buf);
     var assets_writer = assets.writer(assets_buf);
 

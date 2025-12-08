@@ -1,5 +1,6 @@
 .{
     .name = .spirv_cross,
     .version = "1.0.0",
+    .fingerprint = 0x7ea1d8381a6c67e,
     .paths = .{""},
 }

@@ -21,8 +21,8 @@ pub fn build(b: *std.Build) !void {
 
     lib.linkLibC();
 
-    lib.installHeader(b.path("stb_image.h"), "stb_image.h");
-    root.addIncludePath(b.path(""));
+    lib.installHeader(b.path("vendor/stb_image.h"), "stb_image.h");
+    root.addIncludePath(b.path("vendor"));
     root.addCSourceFile(.{ .file = b.path("main.c") });
 
     b.installArtifact(lib);

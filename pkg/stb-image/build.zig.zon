@@ -1,5 +1,6 @@
 .{
     .name = .stb_image,
+    .fingerprint = 0xe5d36078903777fe,
     .version = "1.0.0",
     .paths = .{""},
 }

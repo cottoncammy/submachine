@@ -17,11 +17,6 @@
         },
         .stb_image = .{ .path = "pkg/stb-image", .lazy = true },
         .assets_pack_generator = .{ .path = "tools/assets-pack-generator", .lazy = true },
-        .tracy = .{
-            .url = "git+https://github.com/allyourcodebase/tracy#581b052eeb1499da2d7a54fc98c33a19108dd665",
-            .hash = "tracy-0.12.2-zvQnzWD5AAFG7MgqEGzoo4Wqm4ZFQ2n8Jd3H9l3Vtuxv",
-            .lazy = true,
-        },
     },
     .paths = .{
         "assets",

@@ -1,6 +1,7 @@
 .{
     .name = .sdl_shadercross,
     .version = "3.0.0",
+    .fingerprint = 0x3b3972a40ad96014,
     .dependencies = .{
         .sdl = .{
             .url = "git+https://github.com/allyourcodebase/SDL3#af9c32ce4824e0ad4337447434c40f2b672faf94",
