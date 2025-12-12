@@ -43,8 +43,7 @@ pub const SamplerDesc = struct {
 };
 
 pub const MaterialIndex = enum {
-    bricks,
-    stone,
+    blue_rect,
 };
 
 const Self = @This();
@@ -103,7 +102,6 @@ pub fn getOrCreatePipeline(
     desc: PipelineDesc,
 ) !*c.SDL_GPUGraphicsPipeline {
     const gpa = self.arena.allocator();
-
     const result = try self.pipelines.getOrPut(gpa, desc);
     if (!result.found_existing) {
         const vert_shader = try gpu.createShader(gpa, self.device, desc.vert_shader,

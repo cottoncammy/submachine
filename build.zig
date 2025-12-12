@@ -96,6 +96,14 @@ pub fn build(b: *std.Build) !void {
         exe.linkLibrary(dep.artifact("stb-image"));
     }
 
+    if (b.lazyDependency("nuklear", .{
+        .target = target,
+        .optimize = optimize,
+        .use_llvm = use_llvm,
+    })) |dep| {
+        exe.linkLibrary(dep.artifact("nuklear"));
+    }
+
     try copyAssets(b, gpa, &asset_paths);
 
     if (b.lazyDependency("assets_pack_generator", .{

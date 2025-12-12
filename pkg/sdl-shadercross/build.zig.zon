@@ -3,13 +3,22 @@
     .version = "3.0.0",
     .fingerprint = 0x3b3972a40ad96014,
     .dependencies = .{
+        .sdl_shadercross = .{
+            .url = "git+https://github.com/libsdl-org/SDL_shadercross#f1ca8cfefba8f32095861bbcf2a4f4d773f0fbb4",
+            .hash = "N-V-__8AAKPFBgA_3KZNfagz7_-EDknfjsGuIeGTj-2c5t5b",
+        },
         .sdl = .{
             .url = "git+https://github.com/allyourcodebase/SDL3#af9c32ce4824e0ad4337447434c40f2b672faf94",
             .hash = "sdl-0.0.0-i4QD0btgqAABajEXrQnyZr1xVsk7LM48w2nBmuQ5gdfr",
             .lazy = true,
         },
-        .spirv_cross = .{.path = "../spirv-cross", .lazy = true },
-        .directx_shader_compiler = .{.path = "../directx-shader-compiler", .lazy = true },
+        .sdl_upstream = .{
+            .url = "https://github.com/libsdl-org/SDL/archive/refs/tags/release-3.2.22.tar.gz",
+            .hash = "N-V-__8AAKFOjAPblBRKaUrjSSH-09iZsd0hSjTHMs3Wj2BE",
+            .version = "3.2.22",
+            .lazy = true,
+        },
+        .spirv_cross = .{ .path = "../spirv-cross", .lazy = true },
     },
     .paths = .{""},
 }

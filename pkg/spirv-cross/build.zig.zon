@@ -2,5 +2,12 @@
     .name = .spirv_cross,
     .version = "1.0.0",
     .fingerprint = 0x7ea1d8381a6c67e,
+    .dependencies = .{
+        .spirv_cross = .{
+            .url = "git+https://github.com/KhronosGroup/SPIRV-Cross#b8bd9d53398efe5207b6eff552444453c53149f8",
+            .hash = "N-V-__8AADTLtwDcSXJIic4rfm-f19zs-j38XGXFqe36RgAe",
+            .lazy = true,
+        },
+    },
     .paths = .{""},
 }

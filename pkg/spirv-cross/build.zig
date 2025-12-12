@@ -33,27 +33,33 @@ pub fn build(b: *std.Build) !void {
     lib.linkLibC();
     lib.linkLibCpp();
 
-    const path = b.path("../../vendor/SDL_shadercross/external/SPIRV-Cross");
-    lib.installHeadersDirectory(path, "", .{ .include_extensions = &.{".h"} });
-    root.addIncludePath(path);
-    root.addCSourceFiles(.{
-        .root = path,
-        .flags = &.{
-            "-DSPIRV_CROSS_C_API_GLSL=1",
-            "-DSPIRV_CROSS_C_API_HLSL=1",
-            "-DSPIRV_CROSS_C_API_MSL=1",
-        },
-        .files = &.{
-            "spirv_cross.cpp",
-            "spirv_parser.cpp",
-            "spirv_cross_parsed_ir.cpp",
-            "spirv_cfg.cpp",
-            "spirv_cross_c.cpp",
-            "spirv_glsl.cpp",
-            "spirv_hlsl.cpp",
-            "spirv_msl.cpp",
-        },
-    });
+    if (b.lazyDependency("spirv_cross", .{
+        .target = target,
+        .optimize = optimize,
+    })) |upstream| {
+        const path = upstream.path("");
+        lib.installHeadersDirectory(path, "", .{ .include_extensions = &.{".h"} });
+        root.addIncludePath(path);
+
+        root.addCSourceFiles(.{
+            .root = path,
+            .flags = &.{
+                "-DSPIRV_CROSS_C_API_GLSL=1",
+                "-DSPIRV_CROSS_C_API_HLSL=1",
+                "-DSPIRV_CROSS_C_API_MSL=1",
+            },
+            .files = &.{
+                "spirv_cross.cpp",
+                "spirv_parser.cpp",
+                "spirv_cross_parsed_ir.cpp",
+                "spirv_cfg.cpp",
+                "spirv_cross_c.cpp",
+                "spirv_glsl.cpp",
+                "spirv_hlsl.cpp",
+                "spirv_msl.cpp",
+            },
+        });
+    }
 
     b.installArtifact(lib);
 }

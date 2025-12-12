@@ -15,6 +15,7 @@ pub const c = @cImport({
     @cInclude("SDL3/SDL.h");
     @cInclude("lz4.h");
     @cInclude("stb_image.h");
+    @cInclude("nuklear.h");
 });
 
 const PipelineDesc = GpuState.PipelineDesc;
@@ -147,17 +148,9 @@ pub fn main() !void {
 
     // materials
     try state.gpu_state.createMaterial(
-        .bricks,
+        .blue_rect,
         pipeline_desc,
-        .bricks,
-        sampler_desc,
-        @sizeOf(f32) * 32,
-    );
-
-    try state.gpu_state.createMaterial(
-        .stone,
-        pipeline_desc,
-        .stone,
+        .purple_rect,
         sampler_desc,
         @sizeOf(f32) * 32,
     );
@@ -191,30 +184,18 @@ pub fn main() !void {
             }
         }
 
+        // draws
         state.render_state.clearDrawQueue();
 
         try state.render_state.pushDraw(
             allocator,
             .{
                 .sprite = .{
-                    .material = .stone,
+                    .material = .blue_rect,
                     .pos = .{ -0.5, -0.5, 0 },
                     .rotation = 0,
-                    .color = .{ 0, 1, 0, 1 },
-                    .size = .{ 1, 1 },
-                },
-            },
-        );
-
-        try state.render_state.pushDraw(
-            allocator,
-            .{
-                .sprite = .{
-                    .material = .bricks,
-                    .pos = .{ -1, -1, 0 },
-                    .rotation = 0,
                     .color = .{ 1, 1, 1, 1 },
-                    .size = .{ 0.25, 0.25 },
+                    .size = .{ 0.30, 0.15 },
                 },
             },
         );
@@ -233,9 +214,6 @@ null, null)) {
     }
 
     if (opt_swapchain) |swapchain| {
-        const batches = try state.render_state.buildBatches(gpa);
-        defer gpa.free(batches);
-
         const transfer_data: [*]SpriteInstance =
             @ptrCast(@alignCast(c.SDL_MapGPUTransferBuffer(
                 state.device,
@@ -243,6 +221,10 @@ null, null)) {
                 true,
             )));
         defer c.SDL_UnmapGPUTransferBuffer(state.device, state.transfer_buf);
+
+        // sort draws
+        const batches = try state.render_state.buildBatches(gpa);
+        defer gpa.free(batches);
 
         const cmds = state.render_state.draw_queue.items;
         for (cmds, 0..) |cmd, i| {
@@ -259,6 +241,7 @@ null, null)) {
         }
 
         const copypass = try gpu.beginCopyPass(cmdbuf);
+
         c.SDL_UploadToGPUBuffer(
             copypass,
             &.{
@@ -272,6 +255,7 @@ null, null)) {
             },
             true,
         );
+
         c.SDL_EndGPUCopyPass(copypass);
 
         const color_target_info = std.mem.zeroInit(c.SDL_GPUColorTargetInfo, .{
@@ -297,7 +281,6 @@ null, null)) {
         for (batches) |batch| {
             const material = try state.gpu_state.getMaterial(batch.material);
             c.SDL_BindGPUGraphicsPipeline(renderpass, material.pipeline);
-
             c.SDL_BindGPUFragmentSamplers(
                 renderpass,
                 0,

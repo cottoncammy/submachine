@@ -7,7 +7,6 @@ const c = @cImport({
     @cInclude("lz4.h");
 });
 
-// TODO
 const max_file_len = 2 * 1024 * 1024;
 
 pub fn main() !void {

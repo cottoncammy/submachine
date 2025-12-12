@@ -1,0 +1,15 @@
+.{
+    .name = .nuklear,
+    .fingerprint = 0xee9396e54f9dad8,
+    .version = "4.12.8",
+    .dependencies = .{
+        .nuklear = .{
+            .url =
+"https://github.com/Immediate-Mode-UI/Nuklear/archive/refs/tags/4.12.8.tar.gz",
+            .hash = "N-V-__8AAJRXZACplwL2Rewz3SHQ2nqva-x0Omg539fHlE83",
+            .version = "4.12.8",
+            .lazy = true,
+        },
+    },
+    .paths = .{""},
+}

@@ -21,11 +21,51 @@ pub fn build(b: *std.Build) !void {
 
     lib.linkLibC();
 
+    const exe_root = b.createModule(.{
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const exe = b.addExecutable(.{
+        .name = "sdl-shadercross-cli",
+        .root_module = exe_root,
+        .use_llvm = use_llvm,
+        .use_lld = use_llvm,
+    });
+
+    exe.linkLibrary(lib);
+
+    if (b.lazyDependency("sdl_shadercross", .{
+        .target = target,
+        .optimize = optimize,
+    })) |upstream| {
+        lib.installHeader(
+            upstream.path("include/SDL3_shadercross/SDL_shadercross.h"),
+            "SDL3_shadercross/SDL_shadercross.h",
+        );
+
+        lib_root.addIncludePath(upstream.path("include"));
+        lib_root.addCSourceFile(.{
+            .flags = &.{"-DSDL_SHADERCROSS_DXC=1"},
+            .file = upstream.path("src/SDL_shadercross.c"),
+        });
+
+        exe_root.addCSourceFile(.{ .file = upstream.path("src/cli.c") });
+    }
+
     if (b.lazyDependency("sdl", .{
         .target = target,
         .optimize = optimize,
     })) |dep| {
         lib.linkLibrary(dep.artifact("SDL3"));
+    }
+
+    if (b.lazyDependency("sdl_upstream", .{
+        .target = target,
+        .optimize = optimize,
+    })) |upstream| {
+        lib.installHeadersDirectory(upstream.path("include/SDL3"), "SDL3", .{});
+        lib_root.addIncludePath(upstream.path("include"));
     }
 
     if (b.lazyDependency("spirv_cross", .{
@@ -40,42 +80,6 @@ pub fn build(b: *std.Build) !void {
         lib.linkSystemLibrary2("dxcompiler", .{ .use_pkg_config = .no });
     }
 
-    const path = b.path("../../vendor/SDL_shadercross");
-
-    lib.installHeader(
-        try path.join(
-            b.allocator,
-            "include/SDL3_shadercross/SDL_shadercross.h",
-        ),
-        "SDL3_shadercross/SDL_shadercross.h",
-    );
-
-    lib_root.addIncludePath(try path.join(b.allocator, "include"));
-    lib_root.addCSourceFiles(.{
-        .root = path,
-        .flags = &.{"-DSDL_SHADERCROSS_DXC=1"},
-        .files = &.{"src/SDL_shadercross.c"},
-    });
-
-    const sdl_path = b.path("../../vendor/SDL/include/SDL3");
-    lib.installHeadersDirectory(sdl_path, "SDL3", .{});
-    lib_root.addIncludePath(sdl_path);
-
     b.installArtifact(lib);
-
-    const exe_root = b.createModule(.{
-        .target = target,
-        .optimize = optimize,
-    });
-
-    const exe = b.addExecutable(.{
-        .name = "sdl-shadercross-cli",
-        .root_module = exe_root,
-        .use_llvm = use_llvm,
-        .use_lld = use_llvm,
-    });
-
-    exe.linkLibrary(lib);
-    exe_root.addCSourceFile(.{ .file = try path.join(b.allocator, "src/cli.c") });
     b.installArtifact(exe);
 }

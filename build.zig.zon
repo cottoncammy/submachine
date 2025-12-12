@@ -9,13 +9,14 @@
             .hash = "sdl-0.0.0-i4QD0btgqAABajEXrQnyZr1xVsk7LM48w2nBmuQ5gdfr",
             .lazy = true,
         },
-        .sdl_shadercross = .{ .path = "pkg/sdl-shadercross", .lazy = true },
         .lz4 = .{
             .url = "git+https://github.com/allyourcodebase/lz4#41f52ab227caf9d48cf88c89a4d2946caa12b102",
             .hash = "lz4-1.10.0-6-ewyzw-4NAAAWDpY4xpiqr4LQhZQAC0x_rGnW2iPh6jk2",
             .lazy = true,
         },
+        .sdl_shadercross = .{ .path = "pkg/sdl-shadercross", .lazy = true },
         .stb_image = .{ .path = "pkg/stb-image", .lazy = true },
+        .nuklear = .{ .path = "pkg/nuklear", .lazy = true },
         .assets_pack_generator = .{ .path = "tools/assets-pack-generator", .lazy = true },
     },
     .paths = .{

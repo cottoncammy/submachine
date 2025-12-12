@@ -109,7 +109,7 @@ pub fn orthoAspect(
         }
     };
 
-    return mat4.ortho(-right, right, -top, top, near, far);
+    return mat4.ortho(-right, right, top, -top, near, far);
 }
 
 pub fn perspective(
