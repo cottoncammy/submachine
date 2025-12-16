@@ -25,7 +25,7 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .optimize = optimize,
     })) |upstream| {
-        lib.installHeader(upstream.path("src/nuklear.h"), "nuklear.h");
+        lib.installHeader(upstream.path("nuklear.h"), "nuklear.h");
         root.addIncludePath(upstream.path("src"));
         root.addCSourceFile(.{ .file = b.path("main.c") });
     }

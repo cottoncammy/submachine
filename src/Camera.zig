@@ -2,13 +2,20 @@ const mat4 = @import("mat4.zig");
 const quat = @import("quat.zig");
 
 pub const Projection = union(enum) {
-    orthographic: struct { scale: f32 },
+    orthographic: struct {
+        left: f32,
+        right: f32,
+        bottom: f32,
+        top: f32,
+    },
+
+    orthographic_aspect: struct { scale: f32 },
     perspective: struct { radians: f32 },
 };
 
 pos: [3]f32 = @splat(0),
 orientation: [4]f32 = quat.identity(),
-proj: Projection = .{ .orthographic = .{ .scale = 1 } },
+proj: Projection = .{ .orthographic_aspect = .{ .scale = 1 } },
 
 viewport: [2]f32,
 aspect_ratio: f32,
@@ -41,7 +48,15 @@ pub fn projMatrix(self: *@This()) [4][4]f32 {
     self.aspect_ratio = if (height == 0) 1 else width / height;
 
     return switch (self.proj) {
-        .orthographic => |ortho| mat4.orthoAspect(
+        .orthographic => |ortho| mat4.ortho(
+            ortho.left,
+            ortho.right,
+            ortho.bottom,
+            ortho.top,
+            self.near,
+            self.far,
+        ),
+        .orthographic_aspect => |ortho| mat4.orthoAspect(
             ortho.scale,
             self.aspect_ratio,
             self.near,

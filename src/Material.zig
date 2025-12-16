@@ -10,7 +10,7 @@ texture: ?*c.SDL_GPUTexture,
 sampler: ?*c.SDL_GPUSampler,
 uniform_buf: []u8,
 
-pub fn writeMat4(self: Self, mat: [16]f32, offset: usize) void {
+pub fn writeMat4(self: *Self, mat: [16]f32, offset: usize) void {
     const stride = @sizeOf(f32) * 16;
     const start = offset * stride;
     const src: []const u8 = @ptrCast(mat[0..]);

@@ -83,7 +83,7 @@ pub fn main() !void {
     // assets state
     state.assets_state = try allocator.create(AssetsState);
     defer allocator.destroy(state.assets_state);
-    state.assets_state.* = try AssetsState.init(allocator);
+    state.assets_state.* = try .init(allocator);
     defer state.assets_state.deinit(allocator);
 
     try state.assets_state.parseAssetsManifest(allocator);
@@ -92,7 +92,7 @@ pub fn main() !void {
     // gpu state
     state.gpu_state = try allocator.create(GpuState);
     defer allocator.destroy(state.gpu_state);
-    state.gpu_state.* = try GpuState.init(allocator, state.assets_state, state.device);
+    state.gpu_state.* = try .init(allocator, state.assets_state, state.device);
     defer state.gpu_state.deinit();
 
     // pipeline
@@ -150,7 +150,7 @@ pub fn main() !void {
     try state.gpu_state.createMaterial(
         .blue_rect,
         pipeline_desc,
-        .purple_rect,
+        .blue_rect,
         sampler_desc,
         @sizeOf(f32) * 32,
     );
@@ -165,6 +165,13 @@ pub fn main() !void {
     state.camera = try allocator.create(Camera);
     defer allocator.destroy(state.camera);
     state.camera.* = .init(.{ 960, 600 });
+
+    state.camera.proj = .{ .orthographic = .{
+        .bottom = 0,
+        .top = 100,
+        .left = 0,
+        .right = 100,
+    } };
 
     // main loop
     outer: while (true) {
@@ -192,10 +199,10 @@ pub fn main() !void {
             .{
                 .sprite = .{
                     .material = .blue_rect,
-                    .pos = .{ -0.5, -0.5, 0 },
+                    .pos = .{ 0, 0, 0 },
                     .rotation = 0,
                     .color = .{ 1, 1, 1, 1 },
-                    .size = .{ 0.30, 0.15 },
+                    .size = .{ 12, 10 },
                 },
             },
         );
@@ -279,7 +286,7 @@ null, null)) {
         );
 
         for (batches) |batch| {
-            const material = try state.gpu_state.getMaterial(batch.material);
+            var material = try state.gpu_state.getMaterial(batch.material);
             c.SDL_BindGPUGraphicsPipeline(renderpass, material.pipeline);
             c.SDL_BindGPUFragmentSamplers(
                 renderpass,

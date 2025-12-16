@@ -88,8 +88,8 @@ pub fn ortho(
     var result = mat4.identity();
     result[0][0] = 2 / (right - left);
     result[0][3] = -(right + left) / (right - left);
-    result[1][1] = 2 / (top - bottom);
-    result[1][3] = -(top + bottom) / (top - bottom);
+    result[1][1] = 2 / (bottom - top);
+    result[1][3] = -(top + bottom) / (bottom - top);
     result[2][2] = 1 / (far - near);
     result[2][3] = -near / (far - near);
     return result;
