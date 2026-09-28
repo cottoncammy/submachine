@@ -9,8 +9,13 @@ pub const Projection = union(enum) {
         top: f32,
     },
 
-    orthographic_aspect: struct { scale: f32 },
-    perspective: struct { radians: f32 },
+    orthographic_aspect: struct {
+        scale: f32,
+    },
+
+    perspective: struct {
+        radians: f32,
+    },
 };
 
 pos: [3]f32 = @splat(0),

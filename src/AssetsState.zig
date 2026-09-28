@@ -20,9 +20,8 @@ pub const ShaderInfo = struct {
     spv_comp_len: usize,
 };
 
-pub const AssetInfo = struct {
-    offset: usize,
-    len: usize,
+pub const TextureInfo = struct {
+    path: []const u8,
 };
 
 pub const ShaderIndex = enum(u8) {
@@ -47,9 +46,9 @@ pub const ShaderJson = struct {
 
 const ManifestEntryJson = struct {
     name: []const u8,
-    offset: usize,
-    len: usize,
-    comp_len: usize,
+    offset: ?usize = null,
+    len: ?usize = null,
+    comp_len: ?usize = null,
 };
 
 const AssetType = enum {
@@ -61,7 +60,7 @@ const AssetType = enum {
 file_map: []align(std.heap.page_size_min) const u8,
 
 shaders_lut: []?*ShaderInfo,
-textures_lut: []?*AssetInfo,
+textures_lut: []?*TextureInfo,
 
 const Self = @This();
 
@@ -76,7 +75,7 @@ pub fn init(gpa: Allocator) !Self {
     errdefer gpa.free(self.shaders_lut);
     @memset(self.shaders_lut, null);
 
-    self.textures_lut = try gpa.alloc(?*AssetInfo, max_textures_len);
+    self.textures_lut = try gpa.alloc(?*TextureInfo, max_textures_len);
     @memset(self.textures_lut, null);
     return self;
 }
@@ -84,6 +83,7 @@ pub fn init(gpa: Allocator) !Self {
 pub fn deinit(self: *Self, gpa: Allocator) void {
     for (self.textures_lut) |opt_textureinfo| {
         if (opt_textureinfo) |textureinfo| {
+            gpa.free(textureinfo.path);
             gpa.destroy(textureinfo);
         }
     }
@@ -122,7 +122,13 @@ pub fn parseAssetsManifest(self: *Self, gpa: Allocator) !void {
     const json_buf = try reader.interface.allocRemaining(gpa, .limited(max_file_len));
     defer gpa.free(json_buf);
 
-    const parsed = try std.json.parseFromSlice([]ManifestEntryJson, gpa, json_buf, .{});
+    const parsed = try std.json.parseFromSlice(
+        []ManifestEntryJson,
+        gpa,
+        json_buf,
+        .{},
+    );
+
     defer parsed.deinit();
 
     for (parsed.value) |entry| {
@@ -146,13 +152,13 @@ pub fn parseAssetsManifest(self: *Self, gpa: Allocator) !void {
                 };
 
                 if (asset_type == .shader_json) {
-                    shaderinfo.json_offset = offset;
-                    shaderinfo.json_len = len;
-                    shaderinfo.json_comp_len = comp_len;
+                    shaderinfo.json_offset = offset.?;
+                    shaderinfo.json_len = len.?;
+                    shaderinfo.json_comp_len = comp_len.?;
                 } else {
-                    shaderinfo.spv_offset = offset;
-                    shaderinfo.spv_len = len;
-                    shaderinfo.spv_comp_len = comp_len;
+                    shaderinfo.spv_offset = offset.?;
+                    shaderinfo.spv_len = len.?;
+                    shaderinfo.spv_comp_len = comp_len.?;
                 }
             },
 
@@ -165,8 +171,10 @@ pub fn parseAssetsManifest(self: *Self, gpa: Allocator) !void {
                     );
                     return err;
                 };
-                textureinfo.offset = offset;
-                textureinfo.len = len;
+
+                const path = try std.fs.path.join(gpa, &.{ assets_path, name });
+                errdefer gpa.free(path);
+                textureinfo.path = path;
             },
         }
     }
@@ -231,6 +239,7 @@ pub fn readShaderJson(
         @intCast(comp_len),
         @intCast(len),
     );
+
     if (result == 0) {
         log.err("Failed to decompress shader json", .{});
         return error.LZ4Decompression;
@@ -256,16 +265,19 @@ pub fn readTexture(
     std.debug.assert(self.textures_lut.len > idx);
     const textureinfo = self.textures_lut[idx].?;
 
-    const buf = try gpa.alloc(u8, textureinfo.len);
-    defer gpa.free(buf);
-    @memcpy(
-        buf,
-        self.file_map[textureinfo.offset .. textureinfo.offset + textureinfo.len],
-    );
+    const file = try std.fs.openFileAbsolute(textureinfo.path, .{});
+    defer file.close();
+
+    const in_buf = try gpa.alloc(u8, 1024);
+    defer gpa.free(in_buf);
+    var reader = file.reader(in_buf);
+
+    const out_buf = try reader.interface.allocRemaining(gpa, .limited(max_file_len));
+    defer gpa.free(out_buf);
 
     return c.stbi_load_from_memory(
-        buf.ptr,
-        @intCast(buf.len),
+        out_buf.ptr,
+        @intCast(out_buf.len),
         width,
         height,
         channels,
@@ -334,7 +346,7 @@ fn getShaderInfo(self: *Self, gpa: Allocator, shaderidx: u8) !*ShaderInfo {
         shaderinfo.* = std.mem.zeroes(ShaderInfo);
         self.shaders_lut[shaderidx] = shaderinfo;
     }
-    return self.shaders_lut[shaderidx] orelse unreachable;
+    return self.shaders_lut[shaderidx].?;
 }
 
 fn getShaderIndex(fname: []const u8) !u8 {
@@ -349,14 +361,14 @@ fn getShaderIndex(fname: []const u8) !u8 {
     }
 }
 
-fn getTextureInfo(self: *Self, gpa: Allocator, textureidx: TextureIndex) !*AssetInfo {
+fn getTextureInfo(self: *Self, gpa: Allocator, textureidx: TextureIndex) !*TextureInfo {
     const idx = @intFromEnum(textureidx);
     if (self.textures_lut.len <= idx or self.textures_lut[idx] == null) {
-        const textureinfo = try gpa.create(AssetInfo);
-        textureinfo.* = std.mem.zeroes(AssetInfo);
+        const textureinfo = try gpa.create(TextureInfo);
+        textureinfo.* = std.mem.zeroes(TextureInfo);
         self.textures_lut[idx] = textureinfo;
     }
-    return self.textures_lut[idx] orelse unreachable;
+    return self.textures_lut[idx].?;
 }
 
 fn getTextureIndex(fname: []const u8) !TextureIndex {

@@ -75,8 +75,7 @@ pub fn build(b: *std.Build) !void {
         defer gpa.free(in_path);
 
         for (formats) |format| {
-            const run_shadercross =
-                b.addRunArtifact(shadercross_dep.artifact("sdl-shadercross-cli"));
+            const run_shadercross = b.addRunArtifact(shadercross_dep.artifact("sdl-shadercross-cli"));
 
             run_shadercross.addFileArg(b.path(in_path));
             run_shadercross.addArg("--output");
@@ -107,6 +106,7 @@ pub fn build(b: *std.Build) !void {
     const out_path = try std.fs.path.join(gpa, &.{ b.install_path, "assets" });
     defer gpa.free(out_path);
     const out = run_assets.addOutputDirectoryArg(out_path);
+
     for (asset_paths.items) |path| {
         run_assets.addFileArg(path);
     }

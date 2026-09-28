@@ -42,6 +42,7 @@ pub fn main() !void {
     while (args.next()) |arg| {
         try writeManifestEntry(
             allocator,
+            assets_path,
             arg,
             &stringify,
             &assets_writer,
@@ -56,6 +57,7 @@ pub fn main() !void {
 
 fn writeManifestEntry(
     gpa: Allocator,
+    assets_path: []const u8,
     path: []const u8,
     stringify: *std.json.Stringify,
     writer: *std.fs.File.Writer,
@@ -65,6 +67,19 @@ fn writeManifestEntry(
     const name = std.fs.path.basename(path);
     try stringify.objectField("name");
     try stringify.write(name);
+
+    // textures are not packed
+    if (std.mem.endsWith(u8, name, ".png")) {
+        const src_path = try std.fs.cwd().realpathAlloc(gpa, path);
+        defer gpa.free(src_path);
+        const dest_path = try std.fs.path.join(gpa, &.{ assets_path, name });
+        defer gpa.free(dest_path);
+        try std.fs.copyFileAbsolute(src_path, dest_path, .{});
+
+        try stringify.endObject();
+        return;
+    }
+
     try stringify.objectField("offset");
     try stringify.write(offset);
 
@@ -83,27 +98,24 @@ fn writeManifestEntry(
     defer gpa.free(out_buf);
 
     const len = in_buf_nul.len;
-    var comp_len: usize = 0;
-    if (std.mem.endsWith(u8, name, ".png")) {
-        offset.* += len;
-        _ = try writer.interface.write(in_buf_nul);
-    } else {
-        comp_len = @intCast(c.LZ4_compress_default(
-            in_buf_nul.ptr,
-            out_buf.ptr,
-            @intCast(in_buf_nul.len),
-            @intCast(out_buf.len),
-        ));
-        if (comp_len == 0) {
-            log.err("Failed to compress asset {s}", .{name});
-            return error.LZ4Compression;
-        }
-        offset.* += comp_len;
-        _ = try writer.interface.write(out_buf[0..comp_len]);
-    }
-
     try stringify.objectField("len");
     try stringify.write(len);
+
+    const comp_len: usize = @intCast(c.LZ4_compress_default(
+        in_buf_nul.ptr,
+        out_buf.ptr,
+        @intCast(in_buf_nul.len),
+        @intCast(out_buf.len),
+    ));
+
+    if (comp_len == 0) {
+        log.err("Failed to compress asset {s}", .{name});
+        return error.LZ4Compression;
+    }
+
+    offset.* += comp_len;
+    _ = try writer.interface.write(out_buf[0..comp_len]);
+
     try stringify.objectField("comp_len");
     try stringify.write(comp_len);
     try stringify.endObject();
