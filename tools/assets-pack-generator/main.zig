@@ -7,7 +7,7 @@ const c = @cImport({
     @cInclude("lz4.h");
 });
 
-const max_file_len = 2 * 1024 * 1024;
+const max_file_len = 500 * 1024;
 
 pub fn main() !void {
     var gpa: std.heap.DebugAllocator(.{}) = .init;

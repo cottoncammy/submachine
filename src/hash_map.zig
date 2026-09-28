@@ -2,15 +2,13 @@ const std = @import("std");
 
 pub fn Context(comptime K: type) type {
     return struct {
-        pub fn hash(ctx: @This(), key: K) u64 {
-            _ = ctx;
+        pub fn hash(_: @This(), key: K) u64 {
             var hasher: std.hash.Wyhash = .init(0);
             hashStruct(&hasher, key);
             return hasher.final();
         }
 
-        pub fn eql(ctx: @This(), a: K, b: K) bool {
-            _ = ctx;
+        pub fn eql(_: @This(), a: K, b: K) bool {
             return std.meta.eql(a, b);
         }
 

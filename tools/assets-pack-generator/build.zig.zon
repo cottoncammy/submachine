@@ -1,6 +1,7 @@
 .{
     .name = .assets_pack_generator,
     .version = "0.1.0",
+    .fingerprint = 0x4fbdd21f959cb167,
     .dependencies = .{
         .lz4 = .{
             .url = "git+https://github.com/allyourcodebase/lz4#41f52ab227caf9d48cf88c89a4d2946caa12b102",

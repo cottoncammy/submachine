@@ -286,22 +286,15 @@ pub fn readTexture(
 }
 
 fn getAssetsPath(gpa: Allocator) ![]const u8 {
-    const buf = try gpa.alloc(u8, std.posix.PATH_MAX);
-    defer gpa.free(buf);
-    @memset(buf, 0);
+    const bin_path = try std.fs.selfExeDirPathAlloc(gpa);
+    defer gpa.free(bin_path);
 
-    const bin_path = try std.posix.readlink("/proc/self/exe", buf);
-    const parent_path = std.fs.path.dirname(bin_path) orelse {
-        log.err("Binary is not at the expected location: {s}", .{bin_path});
-        return error.BinaryLocation;
-    };
-
-    if (!std.mem.endsWith(u8, parent_path, "bin")) {
+    if (!std.mem.endsWith(u8, bin_path, "bin")) {
         log.err("Binary is not at the expected location: {s}", .{bin_path});
         return error.BinaryLocation;
     }
 
-    const grandparent_path = std.fs.path.dirname(parent_path) orelse {
+    const grandparent_path = std.fs.path.dirname(bin_path) orelse {
         log.err("Binary is not at the expected location: {s}", .{bin_path});
         return error.BinaryLocation;
     };

@@ -4,18 +4,19 @@
     .fingerprint = 0x3b3972a40ad96014,
     .dependencies = .{
         .sdl_shadercross = .{
-            .url = "git+https://github.com/libsdl-org/SDL_shadercross#f1ca8cfefba8f32095861bbcf2a4f4d773f0fbb4",
-            .hash = "N-V-__8AAKPFBgA_3KZNfagz7_-EDknfjsGuIeGTj-2c5t5b",
+            .url = "git+https://github.com/libsdl-org/SDL_shadercross#1ff05bec573988a98ef9e0260b4da44f512b8367",
+            .hash = "N-V-__8AAGvVBgDrDQ8KzSK2mu4_Fx4kQ-Cy0W1lVraXo4kr",
+            .lazy = true,
         },
         .sdl = .{
-            .url = "git+https://github.com/allyourcodebase/SDL3#af9c32ce4824e0ad4337447434c40f2b672faf94",
-            .hash = "sdl-0.0.0-i4QD0btgqAABajEXrQnyZr1xVsk7LM48w2nBmuQ5gdfr",
+            .url = "git+https://github.com/allyourcodebase/SDL3#5a6356ecc66dd5a0b95b0d261baf193489f3e3bc",
+            .hash = "sdl-1.0.0+3.4.4-i4QD0XSAqQBKbp9DITVMlxhI0QRGylegbPhtm-afaUXE",
             .lazy = true,
         },
         .sdl_upstream = .{
-            .url = "https://github.com/libsdl-org/SDL/archive/refs/tags/release-3.2.22.tar.gz",
-            .hash = "N-V-__8AAKFOjAPblBRKaUrjSSH-09iZsd0hSjTHMs3Wj2BE",
-            .version = "3.2.22",
+            .url = "https://github.com/libsdl-org/SDL/archive/refs/tags/release-3.4.16.tar.gz",
+            .hash = "N-V-__8AABHq9wIiTHGY4qR6mw45F_TX8FSvqsQQ-Wtq1tzY",
+            .version = "3.4.16",
             .lazy = true,
         },
         .spirv_cross = .{ .path = "../spirv-cross" },

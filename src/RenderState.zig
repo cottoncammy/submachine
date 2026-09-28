@@ -21,8 +21,7 @@ pub const DrawCommand = union(DrawType) {
 };
 
 pub const DrawCommandContext = struct {
-    pub fn lessThan(ctx: DrawCommandContext, lhs: DrawCommand, rhs: DrawCommand) bool {
-        _ = ctx;
+    pub fn lessThan(_: DrawCommandContext, lhs: DrawCommand, rhs: DrawCommand) bool {
         if (!std.mem.eql(u8, @tagName(lhs), @tagName(rhs))) {
             return @intFromEnum(lhs) < @intFromEnum(rhs);
         }

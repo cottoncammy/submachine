@@ -92,8 +92,7 @@ pub fn deinit(self: *Self) void {
     for (self.textures) |texture| c.SDL_ReleaseGPUTexture(self.device, texture);
 
     var pipelines = self.pipelines.valueIterator();
-    while (pipelines.next()) |value| c.SDL_ReleaseGPUGraphicsPipeline(self.device,
-value.*);
+    while (pipelines.next()) |value| c.SDL_ReleaseGPUGraphicsPipeline(self.device, value.*);
     self.arena.deinit();
 }
 
@@ -104,11 +103,9 @@ pub fn getOrCreatePipeline(
     const gpa = self.arena.allocator();
     const result = try self.pipelines.getOrPut(gpa, desc);
     if (!result.found_existing) {
-        const vert_shader = try gpu.createShader(gpa, self.device, desc.vert_shader,
-self.assets_state);
+        const vert_shader = try gpu.createShader(gpa, self.device, desc.vert_shader, self.assets_state);
         defer c.SDL_ReleaseGPUShader(self.device, vert_shader);
-        const frag_shader = try gpu.createShader(gpa, self.device, desc.frag_shader,
-self.assets_state);
+        const frag_shader = try gpu.createShader(gpa, self.device, desc.frag_shader, self.assets_state);
         defer c.SDL_ReleaseGPUShader(self.device, frag_shader);
 
         var createinfo = getPipelineCreateInfo(desc);
@@ -133,6 +130,7 @@ pub fn getOrCreateTexture(
         var width: c_int = 0;
         var height: c_int = 0;
         var channels: c_int = 0;
+
         var buf = try self.assets_state.readTexture(
             self.arena.allocator(),
             textureidx,
@@ -158,11 +156,10 @@ pub fn getOrCreateTexture(
 
         const transfer_buf_info = c.SDL_GPUTransferBufferCreateInfo{
             .usage = c.SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
-            .size = @intCast(width * height * 4),
+            .size = @intCast(width * height * channels),
         };
 
-        const transfer_buf = try gpu.createTransferBuffer(self.device,
-&transfer_buf_info);
+        const transfer_buf = try gpu.createTransferBuffer(self.device, &transfer_buf_info);
         defer c.SDL_ReleaseGPUTransferBuffer(self.device, transfer_buf);
 
         const transfer_data: [*]u8 =
