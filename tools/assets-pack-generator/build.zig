@@ -29,13 +29,5 @@ pub fn build(b: *std.Build) !void {
         exe.linkLibrary(dep.artifact("lz4"));
     }
 
-    if (b.lazyDependency("stb_image", .{
-        .target = target,
-        .optimize = optimize,
-        .use_llvm = use_llvm,
-    })) |dep| {
-        exe.linkLibrary(dep.artifact("stb-image"));
-    }
-
     b.installArtifact(exe);
 }

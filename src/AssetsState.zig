@@ -204,7 +204,7 @@ pub fn readShaderCode(
     );
     if (result == 0) {
         log.err("Failed to decompress shader code", .{});
-        return error.LZ4Decompress;
+        return error.LZ4Decompression;
     }
     return code;
 }
@@ -233,7 +233,7 @@ pub fn readShaderJson(
     );
     if (result == 0) {
         log.err("Failed to decompress shader json", .{});
-        return error.LZ4Decompress;
+        return error.LZ4Decompression;
     }
 
     return try std.json.parseFromSlice(

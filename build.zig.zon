@@ -14,10 +14,9 @@
             .hash = "lz4-1.10.0-6-ewyzw-4NAAAWDpY4xpiqr4LQhZQAC0x_rGnW2iPh6jk2",
             .lazy = true,
         },
-        .sdl_shadercross = .{ .path = "pkg/sdl-shadercross", .lazy = true },
-        .stb_image = .{ .path = "pkg/stb-image", .lazy = true },
-        .nuklear = .{ .path = "pkg/nuklear", .lazy = true },
-        .assets_pack_generator = .{ .path = "tools/assets-pack-generator", .lazy = true },
+        .sdl_shadercross = .{ .path = "pkg/sdl-shadercross" },
+        .stb_image = .{ .path = "pkg/stb-image" },
+        .assets_pack_generator = .{ .path = "tools/assets-pack-generator" },
     },
     .paths = .{
         "assets",

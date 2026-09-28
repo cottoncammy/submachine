@@ -53,34 +53,6 @@ pub fn build(b: *std.Build) !void {
         exe.linkLibrary(dep.artifact("SDL3"));
     }
 
-    if (b.lazyDependency("sdl_shadercross", .{
-        .target = target,
-        .optimize = optimize,
-        .use_llvm = use_llvm,
-    })) |dep| {
-        exe.linkLibrary(dep.artifact("sdl-shadercross"));
-
-        const formats = &[_][]const u8{ ".spv", ".json" };
-
-        for (try getShaderFiles(gpa)) |shader| {
-            defer gpa.free(shader);
-            const in_path = try std.fs.path.join(gpa, &.{ "assets/shaders", shader });
-            defer gpa.free(in_path);
-
-            for (formats) |format| {
-                const run_shadercross =
-                    b.addRunArtifact(dep.artifact("sdl-shadercross-cli"));
-
-                run_shadercross.addFileArg(b.path(in_path));
-                run_shadercross.addArg("--output");
-
-                const stem = std.fs.path.stem(shader);
-                const out_path = b.fmt("assets/{s}{s}", .{ stem, format });
-                try asset_paths.append(gpa, run_shadercross.addOutputFileArg(out_path));
-            }
-        }
-    }
-
     if (b.lazyDependency("lz4", .{
         .target = target,
         .optimize = optimize,
@@ -88,48 +60,64 @@ pub fn build(b: *std.Build) !void {
         exe.linkLibrary(dep.artifact("lz4"));
     }
 
-    if (b.lazyDependency("stb_image", .{
+    const shadercross_dep = b.dependency("sdl_shadercross", .{
         .target = target,
         .optimize = optimize,
         .use_llvm = use_llvm,
-    })) |dep| {
-        exe.linkLibrary(dep.artifact("stb-image"));
+    });
+
+    exe.linkLibrary(shadercross_dep.artifact("sdl-shadercross"));
+
+    const formats = &[_][]const u8{ ".spv", ".json" };
+    for (try getShaderFiles(gpa)) |shader| {
+        defer gpa.free(shader);
+        const in_path = try std.fs.path.join(gpa, &.{ "assets/shaders", shader });
+        defer gpa.free(in_path);
+
+        for (formats) |format| {
+            const run_shadercross =
+                b.addRunArtifact(shadercross_dep.artifact("sdl-shadercross-cli"));
+
+            run_shadercross.addFileArg(b.path(in_path));
+            run_shadercross.addArg("--output");
+
+            const stem = std.fs.path.stem(shader);
+            const out_path = b.fmt("assets/{s}{s}", .{ stem, format });
+            try asset_paths.append(gpa, run_shadercross.addOutputFileArg(out_path));
+        }
     }
 
-    if (b.lazyDependency("nuklear", .{
+    const stb_image_dep = b.dependency("stb_image", .{
         .target = target,
         .optimize = optimize,
         .use_llvm = use_llvm,
-    })) |dep| {
-        exe.linkLibrary(dep.artifact("nuklear"));
-    }
+    });
+
+    exe.linkLibrary(stb_image_dep.artifact("stb-image"));
 
     try copyAssets(b, gpa, &asset_paths);
-
-    if (b.lazyDependency("assets_pack_generator", .{
+    const assets_dep = b.dependency("assets_pack_generator", .{
         .target = target,
         .optimize = optimize,
         .use_llvm = use_llvm,
-    })) |dep| {
-        const run_asset_pack_gen =
-            b.addRunArtifact(dep.artifact("assets-pack-generator"));
+    });
 
-        const out_path = try std.fs.path.join(gpa, &.{ b.install_path, "assets" });
-        defer gpa.free(out_path);
-        const out = run_asset_pack_gen.addOutputDirectoryArg(out_path);
-        for (asset_paths.items) |path| {
-            run_asset_pack_gen.addFileArg(path);
-        }
+    const run_assets = b.addRunArtifact(assets_dep.artifact("assets-pack-generator"));
 
-        b.getInstallStep().dependOn(&b.addInstallDirectory(.{
-            .source_dir = out,
-            .install_dir = .prefix,
-            .install_subdir = "assets",
-        }).step);
+    const out_path = try std.fs.path.join(gpa, &.{ b.install_path, "assets" });
+    defer gpa.free(out_path);
+    const out = run_assets.addOutputDirectoryArg(out_path);
+    for (asset_paths.items) |path| {
+        run_assets.addFileArg(path);
     }
 
-    const test_step = b.step("test", "Run unit tests");
+    b.getInstallStep().dependOn(&b.addInstallDirectory(.{
+        .source_dir = out,
+        .install_dir = .prefix,
+        .install_subdir = "assets",
+    }).step);
 
+    const test_step = b.step("test", "Run unit tests");
     const tests = b.addTest(.{
         .name = "tests",
         .root_module = root,

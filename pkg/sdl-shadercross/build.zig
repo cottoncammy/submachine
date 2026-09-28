@@ -35,6 +35,10 @@ pub fn build(b: *std.Build) !void {
 
     exe.linkLibrary(lib);
 
+    if (b.systemIntegrationOption("dxcompiler", .{})) {
+        lib.linkSystemLibrary2("dxcompiler", .{ .use_pkg_config = .no });
+    }
+
     if (b.lazyDependency("sdl_shadercross", .{
         .target = target,
         .optimize = optimize,
@@ -68,17 +72,13 @@ pub fn build(b: *std.Build) !void {
         lib_root.addIncludePath(upstream.path("include"));
     }
 
-    if (b.lazyDependency("spirv_cross", .{
+    const spirv_cross_dep = b.dependency("spirv_cross", .{
         .target = target,
         .optimize = optimize,
         .use_llvm = use_llvm,
-    })) |dep| {
-        lib.linkLibrary(dep.artifact("spirv-cross"));
-    }
+    });
 
-    if (b.systemIntegrationOption("dxcompiler", .{})) {
-        lib.linkSystemLibrary2("dxcompiler", .{ .use_pkg_config = .no });
-    }
+    lib.linkLibrary(spirv_cross_dep.artifact("spirv-cross"));
 
     b.installArtifact(lib);
     b.installArtifact(exe);

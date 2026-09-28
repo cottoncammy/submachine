@@ -15,7 +15,6 @@ pub const c = @cImport({
     @cInclude("SDL3/SDL.h");
     @cInclude("lz4.h");
     @cInclude("stb_image.h");
-    @cInclude("nuklear.h");
 });
 
 const PipelineDesc = GpuState.PipelineDesc;
@@ -37,7 +36,7 @@ const SpriteInstance = extern struct {
     rotation: f32,
     color: [4]f32,
     size: [2]f32,
-    padding: [2]f32,
+    _pad1: [2]f32,
 };
 
 const max_sprites = 10;
@@ -63,15 +62,18 @@ pub fn main() !void {
 
     // window
     _ = c.SDL_WINDOWPOS_CENTERED;
-    const window_flags = c.SDL_WINDOW_RESIZABLE;
-    state.window = c.SDL_CreateWindow("submachine", 960, 600, window_flags) orelse {
+    state.window = c.SDL_CreateWindow("submachine", 960, 600, 0) orelse {
         log.err("Failed to create window: {s}", .{c.SDL_GetError()});
         return error.SDLInit;
     };
     defer c.SDL_DestroyWindow(state.window);
 
     // device
-    state.device = try gpu.createDevice();
+    const device_flags = c.SDL_GPU_SHADERFORMAT_SPIRV;
+    state.device = c.SDL_CreateGPUDevice(device_flags, true, null) orelse {
+        log.err("Failed to create GPU device: {s}", .{c.SDL_GetError()});
+        return error.GPUDevice;
+    };
     defer c.SDL_DestroyGPUDevice(state.device);
 
     if (!c.SDL_ClaimWindowForGPUDevice(state.device, state.window)) {
@@ -158,7 +160,7 @@ pub fn main() !void {
     // render state
     state.render_state = try allocator.create(RenderState);
     defer allocator.destroy(state.render_state);
-    state.render_state.* = try RenderState.init(allocator);
+    state.render_state.* = try .init(allocator);
     defer state.render_state.deinit(allocator);
 
     // camera
@@ -194,18 +196,15 @@ pub fn main() !void {
         // draws
         state.render_state.clearDrawQueue();
 
-        try state.render_state.pushDraw(
-            allocator,
-            .{
-                .sprite = .{
-                    .material = .blue_rect,
-                    .pos = .{ 0, 0, 0 },
-                    .rotation = 0,
-                    .color = .{ 1, 1, 1, 1 },
-                    .size = .{ 12, 10 },
-                },
+        try state.render_state.pushDraw(allocator, .{
+            .sprite = .{
+                .material = .blue_rect,
+                .pos = .{ 0, 0, 0 },
+                .rotation = 0,
+                .color = .{ 1, 1, 1, 1 },
+                .size = .{ 12, 10 },
             },
-        );
+        });
 
         try render(state, allocator);
     }
@@ -214,8 +213,7 @@ pub fn main() !void {
 fn render(state: *State, gpa: Allocator) !void {
     const cmdbuf = try gpu.acquireCommandBuffer(state.device);
     var opt_swapchain: ?*c.SDL_GPUTexture = null;
-    if (!c.SDL_WaitAndAcquireGPUSwapchainTexture(cmdbuf, state.window, &opt_swapchain,
-null, null)) {
+    if (!c.SDL_WaitAndAcquireGPUSwapchainTexture(cmdbuf, state.window, &opt_swapchain, null, null)) {
         log.err("Failed to acquire swapchain texture: {s}", .{c.SDL_GetError()});
         return error.GPUDevice;
     }

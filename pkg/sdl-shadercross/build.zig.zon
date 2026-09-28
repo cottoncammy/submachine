@@ -18,7 +18,7 @@
             .version = "3.2.22",
             .lazy = true,
         },
-        .spirv_cross = .{ .path = "../spirv-cross", .lazy = true },
+        .spirv_cross = .{ .path = "../spirv-cross" },
     },
     .paths = .{""},
 }

@@ -14,14 +14,6 @@ const shader_stages = [_]c_uint{
     c.SDL_GPU_SHADERSTAGE_FRAGMENT,
 };
 
-pub fn createDevice() !*c.SDL_GPUDevice {
-    const device_flags = c.SDL_GPU_SHADERFORMAT_SPIRV;
-    return c.SDL_CreateGPUDevice(device_flags, true, null) orelse {
-        log.err("Failed to create GPU device: {s}", .{c.SDL_GetError()});
-        return error.GPUDevice;
-    };
-}
-
 pub fn createShader(
     gpa: Allocator,
     device: *c.SDL_GPUDevice,
