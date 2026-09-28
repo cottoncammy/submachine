@@ -18,6 +18,9 @@ pub const ShaderInfo = struct {
     spv_offset: usize,
     spv_len: usize,
     spv_comp_len: usize,
+    dxil_offset: usize,
+    dxil_len: usize,
+    dxil_comp_len: usize,
 };
 
 pub const TextureInfo = struct {
@@ -54,6 +57,7 @@ const ManifestEntryJson = struct {
 const AssetType = enum {
     shader_json,
     shader_spv,
+    shader_dxil,
     texture_png,
 };
 
@@ -141,6 +145,7 @@ pub fn parseAssetsManifest(self: *Self, gpa: Allocator) !void {
         switch (asset_type) {
             .shader_json,
             .shader_spv,
+            .shader_dxil,
             => {
                 const shaderidx = try getShaderIndex(name);
                 const shaderinfo = self.getShaderInfo(gpa, shaderidx) catch |err| {
@@ -155,10 +160,14 @@ pub fn parseAssetsManifest(self: *Self, gpa: Allocator) !void {
                     shaderinfo.json_offset = offset.?;
                     shaderinfo.json_len = len.?;
                     shaderinfo.json_comp_len = comp_len.?;
-                } else {
+                } else if (asset_type == .shader_spv) {
                     shaderinfo.spv_offset = offset.?;
                     shaderinfo.spv_len = len.?;
                     shaderinfo.spv_comp_len = comp_len.?;
+                } else {
+                    shaderinfo.dxil_offset = offset.?;
+                    shaderinfo.dxil_len = len.?;
+                    shaderinfo.dxil_comp_len = comp_len.?;
                 }
             },
 
@@ -325,6 +334,8 @@ fn getAssetType(fname: []const u8) !AssetType {
         return .shader_json;
     } else if (std.mem.eql(u8, extension, ".spv")) {
         return .shader_spv;
+    } else if (std.mem.eql(u8, extension, ".dxil")) {
+        return .shader_dxil;
     } else if (std.mem.eql(u8, extension, ".png")) {
         return .texture_png;
     } else {

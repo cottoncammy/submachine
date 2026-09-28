@@ -69,7 +69,7 @@ pub fn main() !void {
     defer c.SDL_DestroyWindow(state.window);
 
     // device
-    const device_flags = c.SDL_GPU_SHADERFORMAT_SPIRV;
+    const device_flags = c.SDL_GPU_SHADERFORMAT_SPIRV | c.SDL_GPU_SHADERFORMAT_DXIL;
     state.device = c.SDL_CreateGPUDevice(device_flags, true, null) orelse {
         log.err("Failed to create GPU device: {s}", .{c.SDL_GetError()});
         return error.GPUDevice;

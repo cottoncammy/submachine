@@ -36,7 +36,7 @@ pub fn build(b: *std.Build) !void {
     exe.linkLibrary(lib);
 
     if (b.systemIntegrationOption("dxcompiler", .{})) {
-        lib.linkSystemLibrary2("dxcompiler", .{ .use_pkg_config = .no });
+        lib.linkSystemLibrary2("dxcompiler", .{});
     }
 
     if (b.lazyDependency("sdl_shadercross", .{

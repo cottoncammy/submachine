@@ -11,7 +11,7 @@ comptime {
         .pre = null,
     };
 
-    if (zig_version.order(required_zig_version) == .lt) {
+    if (zig_version.order(required_zig_version) != .eq) {
         @compileError(std.fmt.comptimePrint(
             "Unsupported Zig version: {f}",
             .{zig_version},
@@ -68,7 +68,7 @@ pub fn build(b: *std.Build) !void {
 
     exe.linkLibrary(shadercross_dep.artifact("sdl-shadercross"));
 
-    const formats = &[_][]const u8{ ".spv", ".json" };
+    const formats = &[_][]const u8{ ".spv", ".dxil", ".json" };
     for (try getShaderFiles(gpa)) |shader| {
         defer gpa.free(shader);
         const in_path = try std.fs.path.join(gpa, &.{ "assets/shaders", shader });
