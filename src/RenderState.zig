@@ -27,9 +27,10 @@ pub const DrawCommandContext = struct {
         }
 
         switch (lhs) {
-            .sprite => |l| {
-                const r = rhs.sprite;
-                return @intFromEnum(l.material) < @intFromEnum(r.material);
+            .sprite => |l| switch (rhs) {
+                .sprite => |r| {
+                    return @intFromEnum(l.material) < @intFromEnum(r.material);
+                },
             },
         }
     }
@@ -37,24 +38,25 @@ pub const DrawCommandContext = struct {
 
 const RenderBatch = struct {
     material: MaterialIndex,
-    base: usize,
-    count: usize,
+    offset: usize,
+    len: usize,
+};
+
+const BatchKey = struct {
+    draw_type: DrawType,
+    material: MaterialIndex,
 };
 
 const Self = @This();
 
-draw_queue: *std.ArrayListUnmanaged(DrawCommand),
+draw_queue: std.ArrayListUnmanaged(DrawCommand),
 
-pub fn init(gpa: Allocator) !Self {
-    var self: Self = .{ .draw_queue = undefined };
-    self.draw_queue = try gpa.create(std.ArrayListUnmanaged(DrawCommand));
-    self.draw_queue.* = .empty;
-    return self;
+pub fn init() !Self {
+    return .{ .draw_queue = .empty };
 }
 
 pub fn deinit(self: *Self, gpa: Allocator) void {
     self.draw_queue.deinit(gpa);
-    gpa.destroy(self.draw_queue);
 }
 
 pub fn clearDrawQueue(self: *Self) void {
@@ -80,14 +82,11 @@ pub fn buildBatches(self: Self, gpa: Allocator) ![]RenderBatch {
 
     var i: usize = 0;
     while (i < cmds.len) {
-        const cmd = cmds[i];
-        const material = cmd.sprite.material;
+        const key = getBatchKey(cmds[i]);
         var j: usize = i + 1;
         while (j < cmds.len) {
-            const next = cmds[j];
-            if (@intFromEnum(material) ==
-                @intFromEnum(next.sprite.material))
-            {
+            const next = getBatchKey(cmds[j]);
+            if (std.meta.eql(key, next)) {
                 j += 1;
             } else {
                 break;
@@ -95,13 +94,22 @@ pub fn buildBatches(self: Self, gpa: Allocator) ![]RenderBatch {
         }
 
         try batches.append(gpa, .{
-            .material = material,
-            .base = i,
-            .count = j - i,
+            .material = key.material,
+            .offset = i,
+            .len = j - i,
         });
 
         i = j;
     }
 
     return try batches.toOwnedSlice(gpa);
+}
+
+fn getBatchKey(cmd: DrawCommand) BatchKey {
+    return switch (cmd) {
+        .sprite => |sprite| .{
+            .draw_type = .sprite,
+            .material = sprite.material,
+        },
+    };
 }

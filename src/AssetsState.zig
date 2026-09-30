@@ -28,23 +28,16 @@ pub const TextureInfo = struct {
 };
 
 const AssetsPack = struct {
-    file: *std.fs.File,
+    file: std.fs.File,
 
-    pub fn open(gpa: Allocator, path: []const u8) !AssetsPack {
-        const self: AssetsPack = .{
-            .file = try gpa.create(std.fs.File),
+    pub fn open(path: []const u8) !AssetsPack {
+        return .{
+            .file = try std.fs.cwd().openFile(path, .{}),
         };
-        errdefer gpa.destroy(self.file);
-
-        self.file.* = try std.fs.cwd().openFile(path, .{});
-        errdefer self.file.close();
-
-        return self;
     }
 
-    pub fn close(self: *AssetsPack, gpa: Allocator) void {
+    pub fn close(self: *AssetsPack) void {
         self.file.close();
-        gpa.destroy(self.file);
     }
 
     pub fn read(
@@ -120,7 +113,7 @@ pub fn init(gpa: Allocator) !Self {
     defer gpa.free(assets_pack_path);
 
     var self: Self = .{
-        .assets_pack = try AssetsPack.open(gpa, assets_pack_path),
+        .assets_pack = try AssetsPack.open(assets_pack_path),
         .shaders_lut = &.{},
         .textures_lut = &.{},
     };
@@ -139,9 +132,9 @@ pub fn init(gpa: Allocator) !Self {
     self.textures_lut = try gpa.alloc(?*TextureInfo, max_textures_len);
     errdefer {
         gpa.free(self.textures_lut);
-
-        for (self.shaders_lut) |opt_textureinfo| {
+        for (self.textures_lut) |opt_textureinfo| {
             if (opt_textureinfo) |textureinfo| {
+                gpa.free(textureinfo.path);
                 gpa.destroy(textureinfo);
             }
         }
@@ -168,7 +161,7 @@ pub fn deinit(self: *Self, gpa: Allocator) void {
     }
     gpa.free(self.shaders_lut);
 
-    self.assets_pack.close(gpa);
+    self.assets_pack.close();
 }
 
 pub fn readShaderCode(
@@ -188,6 +181,10 @@ pub fn readShaderCode(
         offset = shaderinfo.spv_offset;
         len = shaderinfo.spv_len;
         comp_len = shaderinfo.spv_comp_len;
+    } else if (format == c.SDL_GPU_SHADERFORMAT_DXIL) {
+        offset = shaderinfo.dxil_offset;
+        len = shaderinfo.dxil_len;
+        comp_len = shaderinfo.dxil_comp_len;
     } else {
         unreachable;
     }
@@ -305,9 +302,6 @@ fn getAssetsPath(gpa: Allocator) ![]const u8 {
 }
 
 fn parseAssetsManifest(self: *Self, gpa: Allocator, assets_path: []const u8) !void {
-    const assets_pack_path = try std.fs.path.join(gpa, &.{ assets_path, "assets.pak" });
-    defer gpa.free(assets_pack_path);
-
     const manifest_path = try std.fs.path.join(gpa, &.{ assets_path, "manifest.json" });
     defer gpa.free(manifest_path);
     var manifest = try std.fs.openFileAbsolute(manifest_path, .{});

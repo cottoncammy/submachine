@@ -157,7 +157,7 @@ pub fn main() !void {
     // render state
     state.render_state = try allocator.create(RenderState);
     defer allocator.destroy(state.render_state);
-    state.render_state.* = try .init(allocator);
+    state.render_state.* = try .init();
     defer state.render_state.deinit(allocator);
 
     // camera
@@ -309,9 +309,9 @@ fn render(state: *State, gpa: Allocator) !void {
 
             c.SDL_DrawGPUPrimitives(
                 renderpass,
-                @intCast(6 * batch.count),
+                @intCast(6 * batch.len),
                 1,
-                @intCast(6 * batch.base),
+                @intCast(6 * batch.offset),
                 0,
             );
         }
