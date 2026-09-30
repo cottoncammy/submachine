@@ -27,6 +27,47 @@ pub const TextureInfo = struct {
     path: []const u8,
 };
 
+const AssetsPack = struct {
+    file: *std.fs.File,
+
+    pub fn open(gpa: Allocator, path: []const u8) !AssetsPack {
+        const self: AssetsPack = .{
+            .file = try gpa.create(std.fs.File),
+        };
+        errdefer gpa.destroy(self.file);
+
+        self.file.* = try std.fs.cwd().openFile(path, .{});
+        errdefer self.file.close();
+
+        return self;
+    }
+
+    pub fn close(self: *AssetsPack, gpa: Allocator) void {
+        self.file.close();
+        gpa.destroy(self.file);
+    }
+
+    pub fn read(
+        self: *AssetsPack,
+        gpa: Allocator,
+        offset: u64,
+        len: usize,
+    ) ![]u8 {
+        const buf = try gpa.alloc(u8, len);
+        errdefer gpa.free(buf);
+
+        var total: usize = 0;
+
+        while (total < buf.len) {
+            const n = try self.file.pread(buf[total..], offset + total);
+            if (n == 0) return error.UnexpectedEOF;
+            total += n;
+        }
+
+        return buf;
+    }
+};
+
 pub const ShaderIndex = enum(u8) {
     sprite_vert = (0 << 1) | 0,
     solid_color_frag = (1 << 1) | 1,
@@ -61,26 +102,53 @@ const AssetType = enum {
     texture_png,
 };
 
-file_map: []align(std.heap.page_size_min) const u8,
-
+assets_pack: AssetsPack,
 shaders_lut: []?*ShaderInfo,
 textures_lut: []?*TextureInfo,
 
 const Self = @This();
 
 pub fn init(gpa: Allocator) !Self {
+    const assets_path = try getAssetsPath(gpa);
+    defer gpa.free(assets_path);
+
+    const assets_pack_path = try std.fs.path.join(
+        gpa,
+        &.{ assets_path, "assets.pak" },
+    );
+
+    defer gpa.free(assets_pack_path);
+
     var self: Self = .{
-        .file_map = &.{},
+        .assets_pack = try AssetsPack.open(gpa, assets_pack_path),
         .shaders_lut = &.{},
         .textures_lut = &.{},
     };
 
     self.shaders_lut = try gpa.alloc(?*ShaderInfo, max_shaders_len);
-    errdefer gpa.free(self.shaders_lut);
+    errdefer {
+        gpa.free(self.shaders_lut);
+        for (self.shaders_lut) |opt_shaderinfo| {
+            if (opt_shaderinfo) |shaderinfo| {
+                gpa.destroy(shaderinfo);
+            }
+        }
+    }
     @memset(self.shaders_lut, null);
 
     self.textures_lut = try gpa.alloc(?*TextureInfo, max_textures_len);
+    errdefer {
+        gpa.free(self.textures_lut);
+
+        for (self.shaders_lut) |opt_textureinfo| {
+            if (opt_textureinfo) |textureinfo| {
+                gpa.destroy(textureinfo);
+            }
+        }
+    }
     @memset(self.textures_lut, null);
+
+    try self.parseAssetsManifest(gpa, assets_path);
     return self;
 }
 
@@ -99,94 +167,8 @@ pub fn deinit(self: *Self, gpa: Allocator) void {
         }
     }
     gpa.free(self.shaders_lut);
-}
 
-pub fn munmapAssetsPack(self: *Self) void {
-    std.posix.munmap(self.file_map);
-}
-
-pub fn parseAssetsManifest(self: *Self, gpa: Allocator) !void {
-    const assets_path = try getAssetsPath(gpa);
-    defer gpa.free(assets_path);
-    const assets_pack_path = try std.fs.path.join(gpa, &.{ assets_path, "assets.pak" });
-    defer gpa.free(assets_pack_path);
-
-    try self.mmapAssetsPack(assets_pack_path);
-    errdefer self.munmapAssetsPack();
-
-    const manifest_path = try std.fs.path.join(gpa, &.{ assets_path, "manifest.json" });
-    defer gpa.free(manifest_path);
-    var manifest = try std.fs.openFileAbsolute(manifest_path, .{});
-    defer manifest.close();
-
-    const manifest_buf = try gpa.alloc(u8, 1024);
-    defer gpa.free(manifest_buf);
-    var reader = manifest.reader(manifest_buf);
-
-    const json_buf = try reader.interface.allocRemaining(gpa, .limited(max_file_len));
-    defer gpa.free(json_buf);
-
-    const parsed = try std.json.parseFromSlice(
-        []ManifestEntryJson,
-        gpa,
-        json_buf,
-        .{},
-    );
-
-    defer parsed.deinit();
-
-    for (parsed.value) |entry| {
-        const name = entry.name;
-        const offset = entry.offset;
-        const len = entry.len;
-        const comp_len = entry.comp_len;
-
-        const asset_type = try getAssetType(name);
-        switch (asset_type) {
-            .shader_json,
-            .shader_spv,
-            .shader_dxil,
-            => {
-                const shaderidx = try getShaderIndex(name);
-                const shaderinfo = self.getShaderInfo(gpa, shaderidx) catch |err| {
-                    log.err(
-                        "Failed to get shader info for {s}: {s}",
-                        .{ name, @errorName(err) },
-                    );
-                    return err;
-                };
-
-                if (asset_type == .shader_json) {
-                    shaderinfo.json_offset = offset.?;
-                    shaderinfo.json_len = len.?;
-                    shaderinfo.json_comp_len = comp_len.?;
-                } else if (asset_type == .shader_spv) {
-                    shaderinfo.spv_offset = offset.?;
-                    shaderinfo.spv_len = len.?;
-                    shaderinfo.spv_comp_len = comp_len.?;
-                } else {
-                    shaderinfo.dxil_offset = offset.?;
-                    shaderinfo.dxil_len = len.?;
-                    shaderinfo.dxil_comp_len = comp_len.?;
-                }
-            },
-
-            .texture_png => {
-                const textureidx = try getTextureIndex(name);
-                const textureinfo = self.getTextureInfo(gpa, textureidx) catch |err| {
-                    log.err(
-                        "Failed to get texture info for {s}: {s}",
-                        .{ name, @errorName(err) },
-                    );
-                    return err;
-                };
-
-                const path = try std.fs.path.join(gpa, &.{ assets_path, name });
-                errdefer gpa.free(path);
-                textureinfo.path = path;
-            },
-        }
-    }
+    self.assets_pack.close(gpa);
 }
 
 pub fn readShaderCode(
@@ -210,20 +192,25 @@ pub fn readShaderCode(
         unreachable;
     }
 
-    const code = try gpa.allocSentinel(u8, len, 0);
-    errdefer gpa.free(code);
+    const compressed = try self.assets_pack.read(gpa, offset, comp_len);
+    defer gpa.free(compressed);
+
+    const buf = try gpa.allocSentinel(u8, len, 0);
+    errdefer gpa.free(buf);
 
     const result = c.LZ4_decompress_safe(
-        @ptrCast(self.file_map[offset .. offset + comp_len]),
-        code.ptr,
+        @ptrCast(compressed.ptr),
+        buf.ptr,
         @intCast(comp_len),
         @intCast(len),
     );
-    if (result == 0) {
+
+    if (result < 0) {
         log.err("Failed to decompress shader code", .{});
         return error.LZ4Decompression;
     }
-    return code;
+
+    return buf;
 }
 
 pub fn readShaderJson(
@@ -239,17 +226,20 @@ pub fn readShaderJson(
     const len = shaderinfo.json_len;
     const comp_len = shaderinfo.json_comp_len;
 
+    const compressed = try self.assets_pack.read(gpa, offset, comp_len);
+    defer gpa.free(compressed);
+
     const buf = try gpa.allocSentinel(u8, len, 0);
     defer gpa.free(buf);
 
     const result = c.LZ4_decompress_safe(
-        @ptrCast(self.file_map[offset .. offset + comp_len]),
+        @ptrCast(compressed.ptr),
         buf.ptr,
         @intCast(comp_len),
         @intCast(len),
     );
 
-    if (result == 0) {
+    if (result < 0) {
         log.err("Failed to decompress shader json", .{});
         return error.LZ4Decompression;
     }
@@ -314,18 +304,89 @@ fn getAssetsPath(gpa: Allocator) ![]const u8 {
     };
 }
 
-fn mmapAssetsPack(self: *Self, path: []const u8) !void {
-    const fd = try std.posix.open(path, .{}, 0o444);
-    defer std.posix.close(fd);
-    const stat = try std.posix.fstat(fd);
-    self.file_map = try std.posix.mmap(
-        null,
-        @intCast(stat.size),
-        std.posix.PROT.READ,
-        .{ .TYPE = .PRIVATE },
-        fd,
-        0,
+fn parseAssetsManifest(self: *Self, gpa: Allocator, assets_path: []const u8) !void {
+    const assets_pack_path = try std.fs.path.join(gpa, &.{ assets_path, "assets.pak" });
+    defer gpa.free(assets_pack_path);
+
+    const manifest_path = try std.fs.path.join(gpa, &.{ assets_path, "manifest.json" });
+    defer gpa.free(manifest_path);
+    var manifest = try std.fs.openFileAbsolute(manifest_path, .{});
+    defer manifest.close();
+
+    const manifest_buf = try gpa.alloc(u8, 1024);
+    defer gpa.free(manifest_buf);
+    var reader = manifest.reader(manifest_buf);
+
+    const json_buf = try reader.interface.allocRemaining(gpa, .limited(max_file_len));
+    defer gpa.free(json_buf);
+
+    const parsed = try std.json.parseFromSlice(
+        []ManifestEntryJson,
+        gpa,
+        json_buf,
+        .{},
     );
+
+    defer parsed.deinit();
+
+    for (parsed.value) |entry| {
+        const name = entry.name;
+        const offset = entry.offset;
+        const len = entry.len;
+        const comp_len = entry.comp_len;
+
+        const asset_type = try getAssetType(name);
+        switch (asset_type) {
+            .shader_json,
+            .shader_spv,
+            .shader_dxil,
+            => {
+                const shaderidx = try getShaderIndex(name);
+                const shaderinfo = self.getShaderInfo(gpa, shaderidx) catch |err| {
+                    log.err(
+                        "Failed to get shader info for {s}: {s}",
+                        .{ name, @errorName(err) },
+                    );
+                    return err;
+                };
+
+                switch (asset_type) {
+                    .shader_json => {
+                        shaderinfo.json_offset = offset.?;
+                        shaderinfo.json_len = len.?;
+                        shaderinfo.json_comp_len = comp_len.?;
+                    },
+                    .shader_spv => {
+                        shaderinfo.spv_offset = offset.?;
+                        shaderinfo.spv_len = len.?;
+                        shaderinfo.spv_comp_len = comp_len.?;
+                    },
+                    .shader_dxil => {
+                        shaderinfo.dxil_offset = offset.?;
+                        shaderinfo.dxil_len = len.?;
+                        shaderinfo.dxil_comp_len = comp_len.?;
+                    },
+                    else => unreachable,
+                }
+            },
+
+            .texture_png => {
+                const textureidx = try getTextureIndex(name);
+                const textureinfo = self.getTextureInfo(gpa, textureidx) catch |err| {
+                    log.err(
+                        "Failed to get texture info for {s}: {s}",
+                        .{ name, @errorName(err) },
+                    );
+                    return err;
+                };
+
+                const path = try std.fs.path.join(gpa, &.{ assets_path, name });
+                errdefer gpa.free(path);
+
+                textureinfo.path = path;
+            },
+        }
+    }
 }
 
 fn getAssetType(fname: []const u8) !AssetType {

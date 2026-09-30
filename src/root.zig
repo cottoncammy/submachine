@@ -88,9 +88,6 @@ pub fn main() !void {
     state.assets_state.* = try .init(allocator);
     defer state.assets_state.deinit(allocator);
 
-    try state.assets_state.parseAssetsManifest(allocator);
-    defer state.assets_state.munmapAssetsPack();
-
     // gpu state
     state.gpu_state = try allocator.create(GpuState);
     defer allocator.destroy(state.gpu_state);
