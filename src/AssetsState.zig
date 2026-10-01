@@ -95,6 +95,7 @@ const AssetType = enum {
     texture_png,
 };
 
+arena: std.heap.ArenaAllocator,
 assets_pack: AssetsPack,
 shaders_lut: []?*ShaderInfo,
 textures_lut: []?*TextureInfo,
@@ -109,64 +110,39 @@ pub fn init(gpa: Allocator) !Self {
         gpa,
         &.{ assets_path, "assets.pak" },
     );
-
     defer gpa.free(assets_pack_path);
 
     var self: Self = .{
+        .arena = .init(gpa),
         .assets_pack = try AssetsPack.open(assets_pack_path),
         .shaders_lut = &.{},
         .textures_lut = &.{},
     };
 
-    self.shaders_lut = try gpa.alloc(?*ShaderInfo, max_shaders_len);
-    errdefer {
-        gpa.free(self.shaders_lut);
-        for (self.shaders_lut) |opt_shaderinfo| {
-            if (opt_shaderinfo) |shaderinfo| {
-                gpa.destroy(shaderinfo);
-            }
-        }
-    }
+    self.shaders_lut = try self.arena.allocator().alloc(
+        ?*ShaderInfo,
+        max_shaders_len,
+    );
     @memset(self.shaders_lut, null);
 
-    self.textures_lut = try gpa.alloc(?*TextureInfo, max_textures_len);
-    errdefer {
-        gpa.free(self.textures_lut);
-        for (self.textures_lut) |opt_textureinfo| {
-            if (opt_textureinfo) |textureinfo| {
-                gpa.free(textureinfo.path);
-                gpa.destroy(textureinfo);
-            }
-        }
-    }
+    self.textures_lut = try self.arena.allocator().alloc(
+        ?*TextureInfo,
+        max_textures_len,
+    );
     @memset(self.textures_lut, null);
 
-    try self.parseAssetsManifest(gpa, assets_path);
+    errdefer self.arena.deinit();
+    try self.parseAssetsManifest(assets_path);
     return self;
 }
 
-pub fn deinit(self: *Self, gpa: Allocator) void {
-    for (self.textures_lut) |opt_textureinfo| {
-        if (opt_textureinfo) |textureinfo| {
-            gpa.free(textureinfo.path);
-            gpa.destroy(textureinfo);
-        }
-    }
-    gpa.free(self.textures_lut);
-
-    for (self.shaders_lut) |opt_shaderinfo| {
-        if (opt_shaderinfo) |shaderinfo| {
-            gpa.destroy(shaderinfo);
-        }
-    }
-    gpa.free(self.shaders_lut);
-
+pub fn deinit(self: *Self) void {
     self.assets_pack.close();
+    self.arena.deinit();
 }
 
 pub fn readShaderCode(
     self: *Self,
-    gpa: Allocator,
     shaderidx: ShaderIndex,
     format: c_uint,
 ) ![:0]u8 {
@@ -188,6 +164,8 @@ pub fn readShaderCode(
     } else {
         unreachable;
     }
+
+    const gpa = self.arena.allocator();
 
     const compressed = try self.assets_pack.read(gpa, offset, comp_len);
     defer gpa.free(compressed);
@@ -212,7 +190,6 @@ pub fn readShaderCode(
 
 pub fn readShaderJson(
     self: *Self,
-    gpa: Allocator,
     shaderidx: ShaderIndex,
 ) !std.json.Parsed(ShaderJson) {
     const idx = @intFromEnum(shaderidx) >> 1;
@@ -222,6 +199,8 @@ pub fn readShaderJson(
     const offset = shaderinfo.json_offset;
     const len = shaderinfo.json_len;
     const comp_len = shaderinfo.json_comp_len;
+
+    const gpa = self.arena.allocator();
 
     const compressed = try self.assets_pack.read(gpa, offset, comp_len);
     defer gpa.free(compressed);
@@ -251,7 +230,6 @@ pub fn readShaderJson(
 
 pub fn readTexture(
     self: *Self,
-    gpa: Allocator,
     textureidx: TextureIndex,
     width: *c_int,
     height: *c_int,
@@ -263,6 +241,8 @@ pub fn readTexture(
 
     const file = try std.fs.openFileAbsolute(textureinfo.path, .{});
     defer file.close();
+
+    const gpa = self.arena.allocator();
 
     const in_buf = try gpa.alloc(u8, 1024);
     defer gpa.free(in_buf);
@@ -301,7 +281,9 @@ fn getAssetsPath(gpa: Allocator) ![]const u8 {
     };
 }
 
-fn parseAssetsManifest(self: *Self, gpa: Allocator, assets_path: []const u8) !void {
+fn parseAssetsManifest(self: *Self, assets_path: []const u8) !void {
+    const gpa = self.arena.allocator();
+
     const manifest_path = try std.fs.path.join(gpa, &.{ assets_path, "manifest.json" });
     defer gpa.free(manifest_path);
     var manifest = try std.fs.openFileAbsolute(manifest_path, .{});
@@ -336,7 +318,7 @@ fn parseAssetsManifest(self: *Self, gpa: Allocator, assets_path: []const u8) !vo
             .shader_dxil,
             => {
                 const shaderidx = try getShaderIndex(name);
-                const shaderinfo = self.getShaderInfo(gpa, shaderidx) catch |err| {
+                const shaderinfo = self.getShaderInfo(shaderidx) catch |err| {
                     log.err(
                         "Failed to get shader info for {s}: {s}",
                         .{ name, @errorName(err) },
@@ -366,7 +348,7 @@ fn parseAssetsManifest(self: *Self, gpa: Allocator, assets_path: []const u8) !vo
 
             .texture_png => {
                 const textureidx = try getTextureIndex(name);
-                const textureinfo = self.getTextureInfo(gpa, textureidx) catch |err| {
+                const textureinfo = self.getTextureInfo(textureidx) catch |err| {
                     log.err(
                         "Failed to get texture info for {s}: {s}",
                         .{ name, @errorName(err) },
@@ -399,9 +381,9 @@ fn getAssetType(fname: []const u8) !AssetType {
     }
 }
 
-fn getShaderInfo(self: *Self, gpa: Allocator, shaderidx: u8) !*ShaderInfo {
+fn getShaderInfo(self: *Self, shaderidx: u8) !*ShaderInfo {
     if (self.shaders_lut.len <= shaderidx or self.shaders_lut[shaderidx] == null) {
-        const shaderinfo = try gpa.create(ShaderInfo);
+        const shaderinfo = try self.arena.allocator().create(ShaderInfo);
         shaderinfo.* = std.mem.zeroes(ShaderInfo);
         self.shaders_lut[shaderidx] = shaderinfo;
     }
@@ -420,10 +402,10 @@ fn getShaderIndex(fname: []const u8) !u8 {
     }
 }
 
-fn getTextureInfo(self: *Self, gpa: Allocator, textureidx: TextureIndex) !*TextureInfo {
+fn getTextureInfo(self: *Self, textureidx: TextureIndex) !*TextureInfo {
     const idx = @intFromEnum(textureidx);
     if (self.textures_lut.len <= idx or self.textures_lut[idx] == null) {
-        const textureinfo = try gpa.create(TextureInfo);
+        const textureinfo = try self.arena.allocator().create(TextureInfo);
         textureinfo.* = std.mem.zeroes(TextureInfo);
         self.textures_lut[idx] = textureinfo;
     }

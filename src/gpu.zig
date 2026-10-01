@@ -21,10 +21,10 @@ pub fn createShader(
     assets_state: *AssetsState,
 ) !*c.SDL_GPUShader {
     const format = c.SDL_GPU_SHADERFORMAT_SPIRV;
-    const code = try assets_state.readShaderCode(gpa, shaderidx, format);
+    const code = try assets_state.readShaderCode(shaderidx, format);
     defer gpa.free(code);
 
-    const parsed = try assets_state.readShaderJson(gpa, shaderidx);
+    const parsed = try assets_state.readShaderJson(shaderidx);
     defer parsed.deinit();
     const json = parsed.value;
 

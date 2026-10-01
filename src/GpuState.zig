@@ -132,7 +132,6 @@ pub fn getOrCreateTexture(
         var channels: c_int = 0;
 
         var buf = try self.assets_state.readTexture(
-            self.arena.allocator(),
             textureidx,
             &width,
             &height,

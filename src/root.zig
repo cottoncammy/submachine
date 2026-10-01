@@ -86,7 +86,7 @@ pub fn main() !void {
     state.assets_state = try allocator.create(AssetsState);
     defer allocator.destroy(state.assets_state);
     state.assets_state.* = try .init(allocator);
-    defer state.assets_state.deinit(allocator);
+    defer state.assets_state.deinit();
 
     // gpu state
     state.gpu_state = try allocator.create(GpuState);
