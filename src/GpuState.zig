@@ -10,7 +10,7 @@ const AssetsState = @import("AssetsState.zig");
 const ShaderIndex = AssetsState.ShaderIndex;
 const TextureIndex = AssetsState.TextureIndex;
 
-const max_textures_len = AssetsState.max_textures_len;
+const max_textures_len = 10;
 const max_materials_len = 10;
 
 pub const PipelineDesc = struct {
@@ -50,7 +50,6 @@ const Self = @This();
 
 arena: std.heap.ArenaAllocator,
 assets_state: *AssetsState,
-
 device: *c.SDL_GPUDevice,
 pipelines: std.HashMapUnmanaged(
     PipelineDesc,

@@ -4,27 +4,21 @@ const Allocator = std.mem.Allocator;
 
 const root = @import("root.zig");
 const c = root.c;
-const State = root.State;
 const AssetsState = @import("AssetsState.zig");
 const ShaderInfo = AssetsState.ShaderInfo;
 const ShaderIndex = AssetsState.ShaderIndex;
 
-const shader_stages = [_]c_uint{
-    c.SDL_GPU_SHADERSTAGE_VERTEX,
-    c.SDL_GPU_SHADERSTAGE_FRAGMENT,
-};
-
 pub fn createShader(
     gpa: Allocator,
     device: *c.SDL_GPUDevice,
-    shaderidx: ShaderIndex,
+    idx: ShaderIndex,
     assets_state: *AssetsState,
 ) !*c.SDL_GPUShader {
     const format = c.SDL_GPU_SHADERFORMAT_SPIRV;
-    const code = try assets_state.readShaderCode(shaderidx, format);
+    const code = try assets_state.readShaderCode(idx, format);
     defer gpa.free(code);
 
-    const parsed = try assets_state.readShaderJson(shaderidx);
+    const parsed = try assets_state.readShaderJson(idx);
     defer parsed.deinit();
     const json = parsed.value;
 
@@ -33,7 +27,7 @@ pub fn createShader(
         .code = code.ptr,
         .entrypoint = "main",
         .format = format,
-        .stage = shader_stages[@intFromEnum(shaderidx) & 0x1],
+        .stage = getShaderStage(idx),
         .num_samplers = json.samplers,
         .num_storage_textures = json.storage_textures,
         .num_storage_buffers = json.storage_buffers,
@@ -114,5 +108,12 @@ pub fn beginCopyPass(cmdbuf: ?*c.SDL_GPUCommandBuffer) !?*c.SDL_GPUCopyPass {
     return c.SDL_BeginGPUCopyPass(cmdbuf) orelse {
         log.err("Failed to begin copy pass: {s}", .{c.SDL_GetError()});
         return error.GPUDevice;
+    };
+}
+
+fn getShaderStage(idx: ShaderIndex) c_uint {
+    return switch (idx) {
+        .sprite_vert => c.SDL_GPU_SHADERSTAGE_VERTEX,
+        .solid_color_frag => c.SDL_GPU_SHADERSTAGE_FRAGMENT,
     };
 }

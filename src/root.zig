@@ -6,6 +6,8 @@ const gpu = @import("gpu.zig");
 const mat4 = @import("mat4.zig");
 const Camera = @import("Camera.zig");
 const GpuState = @import("GpuState.zig");
+const PipelineDesc = GpuState.PipelineDesc;
+const SamplerDesc = GpuState.SamplerDesc;
 const hash_map = @import("hash_map.zig");
 const Material = @import("Material.zig");
 const AssetsState = @import("AssetsState.zig");
@@ -16,9 +18,6 @@ pub const c = @cImport({
     @cInclude("lz4.h");
     @cInclude("stb_image.h");
 });
-
-const PipelineDesc = GpuState.PipelineDesc;
-const SamplerDesc = GpuState.SamplerDesc;
 
 pub const State = struct {
     window: *c.SDL_Window,

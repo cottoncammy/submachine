@@ -6,10 +6,12 @@ const Allocator = std.mem.Allocator;
 
 const c = @import("root.zig").c;
 
-pub const max_shaders_len = 10;
-pub const max_textures_len = 10;
-
 const max_file_len = 500 * 1024;
+
+pub const ShaderIndex = enum(u8) {
+    sprite_vert,
+    solid_color_frag,
+};
 
 pub const ShaderInfo = struct {
     json_offset: usize,
@@ -23,8 +25,23 @@ pub const ShaderInfo = struct {
     dxil_comp_len: usize,
 };
 
+pub const TextureIndex = enum {
+    blue_rect,
+    green_rect,
+    purple_rect,
+    red_rect,
+    yellow_rect,
+};
+
 pub const TextureInfo = struct {
     path: []const u8,
+};
+
+pub const ShaderJson = struct {
+    samplers: c_uint,
+    storage_textures: c_uint,
+    storage_buffers: c_uint,
+    uniform_buffers: c_uint,
 };
 
 const AssetsPack = struct {
@@ -61,26 +78,6 @@ const AssetsPack = struct {
     }
 };
 
-pub const ShaderIndex = enum(u8) {
-    sprite_vert = (0 << 1) | 0,
-    solid_color_frag = (1 << 1) | 1,
-};
-
-pub const TextureIndex = enum {
-    blue_rect,
-    green_rect,
-    purple_rect,
-    red_rect,
-    yellow_rect,
-};
-
-pub const ShaderJson = struct {
-    samplers: c_uint,
-    storage_textures: c_uint,
-    storage_buffers: c_uint,
-    uniform_buffers: c_uint,
-};
-
 const ManifestEntryJson = struct {
     name: []const u8,
     offset: ?usize = null,
@@ -97,8 +94,8 @@ const AssetType = enum {
 
 arena: std.heap.ArenaAllocator,
 assets_pack: AssetsPack,
-shaders_lut: []?*ShaderInfo,
-textures_lut: []?*TextureInfo,
+shaders_lut: []ShaderInfo,
+textures_lut: []TextureInfo,
 
 const Self = @This();
 
@@ -119,17 +116,9 @@ pub fn init(gpa: Allocator) !Self {
         .textures_lut = &.{},
     };
 
-    self.shaders_lut = try self.arena.allocator().alloc(
-        ?*ShaderInfo,
-        max_shaders_len,
-    );
-    @memset(self.shaders_lut, null);
-
-    self.textures_lut = try self.arena.allocator().alloc(
-        ?*TextureInfo,
-        max_textures_len,
-    );
-    @memset(self.textures_lut, null);
+    const allocator = self.arena.allocator();
+    self.shaders_lut = try allocator.alloc(ShaderInfo, enumLen(ShaderIndex));
+    self.textures_lut = try allocator.alloc(TextureInfo, enumLen(TextureIndex));
 
     errdefer self.arena.deinit();
     try self.parseAssetsManifest(assets_path);
@@ -143,12 +132,10 @@ pub fn deinit(self: *Self) void {
 
 pub fn readShaderCode(
     self: *Self,
-    shaderidx: ShaderIndex,
+    idx: ShaderIndex,
     format: c_uint,
 ) ![:0]u8 {
-    const idx = @intFromEnum(shaderidx) >> 1;
-    std.debug.assert(self.shaders_lut.len > idx);
-    const shaderinfo = self.shaders_lut[idx].?;
+    const shaderinfo = self.getShaderInfo(idx);
 
     var offset: usize = 0;
     var len: usize = 0;
@@ -166,7 +153,6 @@ pub fn readShaderCode(
     }
 
     const gpa = self.arena.allocator();
-
     const compressed = try self.assets_pack.read(gpa, offset, comp_len);
     defer gpa.free(compressed);
 
@@ -190,18 +176,15 @@ pub fn readShaderCode(
 
 pub fn readShaderJson(
     self: *Self,
-    shaderidx: ShaderIndex,
+    idx: ShaderIndex,
 ) !std.json.Parsed(ShaderJson) {
-    const idx = @intFromEnum(shaderidx) >> 1;
-    std.debug.assert(self.shaders_lut.len > idx);
-    const shaderinfo = self.shaders_lut[idx].?;
+    const shaderinfo = self.getShaderInfo(idx);
 
     const offset = shaderinfo.json_offset;
     const len = shaderinfo.json_len;
     const comp_len = shaderinfo.json_comp_len;
 
     const gpa = self.arena.allocator();
-
     const compressed = try self.assets_pack.read(gpa, offset, comp_len);
     defer gpa.free(compressed);
 
@@ -230,24 +213,21 @@ pub fn readShaderJson(
 
 pub fn readTexture(
     self: *Self,
-    textureidx: TextureIndex,
+    idx: TextureIndex,
     width: *c_int,
     height: *c_int,
     channels: *c_int,
 ) ![*c]u8 {
-    const idx = @intFromEnum(textureidx);
-    std.debug.assert(self.textures_lut.len > idx);
-    const textureinfo = self.textures_lut[idx].?;
+    const textureinfo = self.getTextureInfo(idx);
 
     const file = try std.fs.openFileAbsolute(textureinfo.path, .{});
     defer file.close();
 
     const gpa = self.arena.allocator();
-
     const in_buf = try gpa.alloc(u8, 1024);
     defer gpa.free(in_buf);
-    var reader = file.reader(in_buf);
 
+    var reader = file.reader(in_buf);
     const out_buf = try reader.interface.allocRemaining(gpa, .limited(max_file_len));
     defer gpa.free(out_buf);
 
@@ -279,6 +259,10 @@ fn getAssetsPath(gpa: Allocator) ![]const u8 {
         log.err("Failed to join paths", .{});
         return err;
     };
+}
+
+fn enumLen(comptime @"enum": type) usize {
+    return @typeInfo(@"enum").@"enum".fields.len;
 }
 
 fn parseAssetsManifest(self: *Self, assets_path: []const u8) !void {
@@ -317,14 +301,8 @@ fn parseAssetsManifest(self: *Self, assets_path: []const u8) !void {
             .shader_spv,
             .shader_dxil,
             => {
-                const shaderidx = try getShaderIndex(name);
-                const shaderinfo = self.getShaderInfo(shaderidx) catch |err| {
-                    log.err(
-                        "Failed to get shader info for {s}: {s}",
-                        .{ name, @errorName(err) },
-                    );
-                    return err;
-                };
+                const idx = try getShaderIndex(name);
+                const shaderinfo = self.getShaderInfo(idx);
 
                 switch (asset_type) {
                     .shader_json => {
@@ -347,14 +325,8 @@ fn parseAssetsManifest(self: *Self, assets_path: []const u8) !void {
             },
 
             .texture_png => {
-                const textureidx = try getTextureIndex(name);
-                const textureinfo = self.getTextureInfo(textureidx) catch |err| {
-                    log.err(
-                        "Failed to get texture info for {s}: {s}",
-                        .{ name, @errorName(err) },
-                    );
-                    return err;
-                };
+                const idx = try getTextureIndex(name);
+                const textureinfo = self.getTextureInfo(idx);
 
                 const path = try std.fs.path.join(gpa, &.{ assets_path, name });
                 errdefer gpa.free(path);
@@ -366,14 +338,14 @@ fn parseAssetsManifest(self: *Self, assets_path: []const u8) !void {
 }
 
 fn getAssetType(fname: []const u8) !AssetType {
-    const extension = std.fs.path.extension(fname);
-    if (std.mem.eql(u8, extension, ".json")) {
+    const ext = std.fs.path.extension(fname);
+    if (std.mem.eql(u8, ext, ".json")) {
         return .shader_json;
-    } else if (std.mem.eql(u8, extension, ".spv")) {
+    } else if (std.mem.eql(u8, ext, ".spv")) {
         return .shader_spv;
-    } else if (std.mem.eql(u8, extension, ".dxil")) {
+    } else if (std.mem.eql(u8, ext, ".dxil")) {
         return .shader_dxil;
-    } else if (std.mem.eql(u8, extension, ".png")) {
+    } else if (std.mem.eql(u8, ext, ".png")) {
         return .texture_png;
     } else {
         log.err("Unexpected asset type {s}", .{fname});
@@ -381,35 +353,24 @@ fn getAssetType(fname: []const u8) !AssetType {
     }
 }
 
-fn getShaderInfo(self: *Self, shaderidx: u8) !*ShaderInfo {
-    if (self.shaders_lut.len <= shaderidx or self.shaders_lut[shaderidx] == null) {
-        const shaderinfo = try self.arena.allocator().create(ShaderInfo);
-        shaderinfo.* = std.mem.zeroes(ShaderInfo);
-        self.shaders_lut[shaderidx] = shaderinfo;
-    }
-    return self.shaders_lut[shaderidx].?;
+fn getShaderInfo(self: *Self, idx: ShaderIndex) *ShaderInfo {
+    return &self.shaders_lut[@intFromEnum(idx)];
 }
 
-fn getShaderIndex(fname: []const u8) !u8 {
+fn getShaderIndex(fname: []const u8) !ShaderIndex {
     const stem = std.fs.path.stem(fname);
     if (std.mem.eql(u8, stem, "sprite.vert")) {
-        return @intFromEnum(ShaderIndex.sprite_vert) >> 1;
+        return .sprite_vert;
     } else if (std.mem.eql(u8, stem, "solid_color.frag")) {
-        return @intFromEnum(ShaderIndex.solid_color_frag) >> 1;
+        return .solid_color_frag;
     } else {
         log.err("Unexpected shader name {s}", .{fname});
         return error.ShaderName;
     }
 }
 
-fn getTextureInfo(self: *Self, textureidx: TextureIndex) !*TextureInfo {
-    const idx = @intFromEnum(textureidx);
-    if (self.textures_lut.len <= idx or self.textures_lut[idx] == null) {
-        const textureinfo = try self.arena.allocator().create(TextureInfo);
-        textureinfo.* = std.mem.zeroes(TextureInfo);
-        self.textures_lut[idx] = textureinfo;
-    }
-    return self.textures_lut[idx].?;
+fn getTextureInfo(self: *Self, idx: TextureIndex) *TextureInfo {
+    return &self.textures_lut[@intFromEnum(idx)];
 }
 
 fn getTextureIndex(fname: []const u8) !TextureIndex {
