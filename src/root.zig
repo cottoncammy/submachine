@@ -23,11 +23,11 @@ pub const State = struct {
     window: *c.SDL_Window,
     device: *c.SDL_GPUDevice,
     assets_state: *AssetsState,
-    gpu_state: *GpuState,
-    render_state: *RenderState,
+    gpu_state: GpuState,
+    render_state: RenderState,
     storage_buf: *c.SDL_GPUBuffer,
     transfer_buf: *c.SDL_GPUTransferBuffer,
-    camera: *Camera,
+    camera: Camera,
 };
 
 const SpriteInstance = extern struct {
@@ -88,9 +88,7 @@ pub fn main() !void {
     defer state.assets_state.deinit();
 
     // gpu state
-    state.gpu_state = try allocator.create(GpuState);
-    defer allocator.destroy(state.gpu_state);
-    state.gpu_state.* = try .init(allocator, state.assets_state, state.device);
+    state.gpu_state = try .init(allocator, state.assets_state, state.device);
     defer state.gpu_state.deinit();
 
     // pipeline
@@ -154,15 +152,11 @@ pub fn main() !void {
     );
 
     // render state
-    state.render_state = try allocator.create(RenderState);
-    defer allocator.destroy(state.render_state);
-    state.render_state.* = try .init();
+    state.render_state = try .init();
     defer state.render_state.deinit(allocator);
 
     // camera
-    state.camera = try allocator.create(Camera);
-    defer allocator.destroy(state.camera);
-    state.camera.* = .init(.{ 960, 600 });
+    state.camera = .init(.{ 960, 600 });
 
     state.camera.proj = .{ .orthographic = .{
         .bottom = 0,
