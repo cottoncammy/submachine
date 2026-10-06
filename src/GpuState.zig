@@ -46,6 +46,16 @@ pub const MaterialIndex = enum {
     blue_rect,
 };
 
+const TextureSlot = union(enum) {
+    empty,
+    ready: *c.SDL_GPUTexture,
+};
+
+const MaterialSlot = union(enum) {
+    empty,
+    ready: Material,
+};
+
 const Self = @This();
 
 arena: std.heap.ArenaAllocator,
@@ -57,41 +67,47 @@ pipelines: std.HashMapUnmanaged(
     hash_map.Context(PipelineDesc),
     std.hash_map.default_max_load_percentage,
 ),
-textures: []?*c.SDL_GPUTexture,
+textures: std.EnumArray(TextureIndex, TextureSlot),
 samplers: std.HashMapUnmanaged(
     SamplerDesc,
     *c.SDL_GPUSampler,
     hash_map.Context(SamplerDesc),
     std.hash_map.default_max_load_percentage,
 ),
-materials: []?*Material,
+materials: std.EnumArray(MaterialIndex, MaterialSlot),
 
 pub fn init(gpa: Allocator, assets_state: *AssetsState, device: *c.SDL_GPUDevice) !Self {
-    var self: Self = .{
+    return .{
         .arena = .init(gpa),
         .assets_state = assets_state,
         .device = device,
         .pipelines = .empty,
-        .textures = &.{},
+        .textures = std.EnumArray(TextureIndex, TextureSlot).initFill(.empty),
         .samplers = .empty,
-        .materials = &.{},
+        .materials = std.EnumArray(MaterialIndex, MaterialSlot).initFill(.empty),
     };
-
-    const allocator = self.arena.allocator();
-    self.textures = try allocator.alloc(?*c.SDL_GPUTexture, max_textures_len);
-    @memset(self.textures, null);
-    self.materials = try allocator.alloc(?*Material, max_materials_len);
-    @memset(self.materials, null);
-    return self;
 }
 
 pub fn deinit(self: *Self) void {
     var samplers = self.samplers.valueIterator();
-    while (samplers.next()) |value| c.SDL_ReleaseGPUSampler(self.device, value.*);
-    for (self.textures) |texture| c.SDL_ReleaseGPUTexture(self.device, texture);
+    while (samplers.next()) |sampler| {
+        c.SDL_ReleaseGPUSampler(self.device, sampler.*);
+    }
+
+    for (std.enums.values(TextureIndex)) |idx| {
+        switch (self.textures.get(idx)) {
+            .ready => |texture| {
+                c.SDL_ReleaseGPUTexture(self.device, texture);
+            },
+            .empty => {},
+        }
+    }
 
     var pipelines = self.pipelines.valueIterator();
-    while (pipelines.next()) |value| c.SDL_ReleaseGPUGraphicsPipeline(self.device, value.*);
+    while (pipelines.next()) |pipeline| {
+        c.SDL_ReleaseGPUGraphicsPipeline(self.device, pipeline.*);
+    }
+
     self.arena.deinit();
 }
 
@@ -120,80 +136,83 @@ pub fn getOrCreatePipeline(
 
 pub fn getOrCreateTexture(
     self: *Self,
-    textureidx: TextureIndex,
+    idx: TextureIndex,
 ) !*c.SDL_GPUTexture {
-    const idx = @intFromEnum(textureidx);
-    std.debug.assert(self.textures.len > idx);
+    const slot = self.textures.getPtr(idx);
 
-    if (self.textures[idx] == null) {
-        var width: c_int = 0;
-        var height: c_int = 0;
-        var channels: c_int = 0;
-
-        var buf = try self.assets_state.readTexture(
-            textureidx,
-            &width,
-            &height,
-            &channels,
-        );
-
-        defer c.stbi_image_free(buf);
-
-        const createinfo = c.SDL_GPUTextureCreateInfo{
-            .type = c.SDL_GPU_TEXTURETYPE_2D,
-            .format = c.SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM,
-            .width = @intCast(width),
-            .height = @intCast(height),
-            .layer_count_or_depth = 1,
-            .num_levels = 1,
-            .usage = c.SDL_GPU_TEXTUREUSAGE_SAMPLER,
-        };
-
-        self.textures[idx] = try gpu.createTexture(self.device, &createinfo);
-        errdefer c.SDL_ReleaseGPUTexture(self.device, self.textures[idx]);
-
-        const transfer_buf_info = c.SDL_GPUTransferBufferCreateInfo{
-            .usage = c.SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
-            .size = @intCast(width * height * channels),
-        };
-
-        const transfer_buf = try gpu.createTransferBuffer(self.device, &transfer_buf_info);
-        defer c.SDL_ReleaseGPUTransferBuffer(self.device, transfer_buf);
-
-        const transfer_data: [*]u8 =
-            @ptrCast(c.SDL_MapGPUTransferBuffer(
-                self.device,
-                transfer_buf,
-                false,
-            ));
-
-        const len: usize = @intCast(width * height * channels);
-        @memcpy(transfer_data[0..len], buf[0..len]);
-        c.SDL_UnmapGPUTransferBuffer(self.device, transfer_buf);
-
-        const cmdbuf = try gpu.acquireCommandBuffer(self.device);
-        const copypass = try gpu.beginCopyPass(cmdbuf);
-
-        c.SDL_UploadToGPUTexture(
-            copypass,
-            &.{
-                .transfer_buffer = transfer_buf,
-                .offset = 0,
-            },
-            &.{
-                .texture = self.textures[idx].?,
-                .w = @intCast(width),
-                .h = @intCast(height),
-                .d = 1,
-            },
-            false,
-        );
-
-        c.SDL_EndGPUCopyPass(copypass);
-        try gpu.submitCommandBuffer(cmdbuf);
+    switch (slot.*) {
+        .ready => |texture| return texture,
+        .empty => {},
     }
 
-    return self.textures[idx].?;
+    var width: c_int = 0;
+    var height: c_int = 0;
+    var channels: c_int = 0;
+
+    var texture_buf = try self.assets_state.readTexture(
+        idx,
+        &width,
+        &height,
+        &channels,
+    );
+
+    defer c.stbi_image_free(texture_buf);
+
+    const createinfo = c.SDL_GPUTextureCreateInfo{
+        .type = c.SDL_GPU_TEXTURETYPE_2D,
+        .format = c.SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM,
+        .width = @intCast(width),
+        .height = @intCast(height),
+        .layer_count_or_depth = 1,
+        .num_levels = 1,
+        .usage = c.SDL_GPU_TEXTUREUSAGE_SAMPLER,
+    };
+
+    const texture = try gpu.createTexture(self.device, &createinfo);
+    errdefer c.SDL_ReleaseGPUTexture(self.device, texture);
+
+    const transfer_buf_info = c.SDL_GPUTransferBufferCreateInfo{
+        .usage = c.SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
+        .size = @intCast(width * height * channels),
+    };
+
+    const transfer_buf = try gpu.createTransferBuffer(self.device, &transfer_buf_info);
+    defer c.SDL_ReleaseGPUTransferBuffer(self.device, transfer_buf);
+
+    const transfer_data: [*]u8 =
+        @ptrCast(c.SDL_MapGPUTransferBuffer(
+            self.device,
+            transfer_buf,
+            false,
+        ));
+
+    const len: usize = @intCast(width * height * channels);
+    @memcpy(transfer_data[0..len], texture_buf[0..len]);
+    c.SDL_UnmapGPUTransferBuffer(self.device, transfer_buf);
+
+    const cmdbuf = try gpu.acquireCommandBuffer(self.device);
+    const copypass = try gpu.beginCopyPass(cmdbuf);
+
+    c.SDL_UploadToGPUTexture(
+        copypass,
+        &.{
+            .transfer_buffer = transfer_buf,
+            .offset = 0,
+        },
+        &.{
+            .texture = texture,
+            .w = @intCast(width),
+            .h = @intCast(height),
+            .d = 1,
+        },
+        false,
+    );
+
+    c.SDL_EndGPUCopyPass(copypass);
+    try gpu.submitCommandBuffer(cmdbuf);
+
+    slot.* = .{ .ready = texture };
+    return texture;
 }
 
 pub fn getOrCreateSampler(
@@ -211,34 +230,41 @@ pub fn getOrCreateSampler(
 
 pub fn createMaterial(
     self: *Self,
-    material_idx: MaterialIndex,
+    idx: MaterialIndex,
     pipeline: PipelineDesc,
     opt_texture: ?TextureIndex,
     opt_sampler: ?SamplerDesc,
     uniform_buf_len: usize,
 ) !void {
-    const idx = @intFromEnum(material_idx);
-    std.debug.assert(self.materials.len > idx);
-    const slot = &self.materials[idx];
-    std.debug.assert(slot.* == null);
+    const slot = self.materials.getPtr(idx);
+
+    switch (slot.*) {
+        .ready => return error.MaterialAlreadyCreated,
+        .empty => {},
+    }
 
     const gpa = self.arena.allocator();
-    const material = try gpa.create(Material);
-    material.* = std.mem.zeroInit(Material, .{
+    var material = std.mem.zeroInit(Material, .{
         .pipeline = try self.getOrCreatePipeline(pipeline),
         .uniform_buf = try gpa.alloc(u8, uniform_buf_len),
     });
 
-    if (opt_texture) |texture| material.*.texture = try self.getOrCreateTexture(texture);
-    if (opt_sampler) |sampler| material.*.sampler = try self.getOrCreateSampler(sampler);
+    if (opt_texture) |texture| {
+        material.texture = try self.getOrCreateTexture(texture);
+    }
+    if (opt_sampler) |sampler| {
+        material.sampler = try self.getOrCreateSampler(sampler);
+    }
 
-    slot.* = material;
+    slot.* = .{ .ready = material };
 }
 
-pub fn getMaterial(self: *Self, material_idx: MaterialIndex) !*Material {
-    const idx = @intFromEnum(material_idx);
-    std.debug.assert(self.materials.len > idx);
-    return self.materials[idx].?;
+pub fn getMaterial(self: *Self, idx: MaterialIndex) !Material {
+    const slot = self.materials.getPtr(idx);
+    return switch (slot.*) {
+        .ready => |material| material,
+        .empty => unreachable,
+    };
 }
 
 fn getPipelineCreateInfo(desc: PipelineDesc) c.SDL_GPUGraphicsPipelineCreateInfo {

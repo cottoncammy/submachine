@@ -67,15 +67,26 @@ const AssetsPack = struct {
         errdefer gpa.free(buf);
 
         var total: usize = 0;
-
         while (total < buf.len) {
             const n = try self.file.pread(buf[total..], offset + total);
-            if (n == 0) return error.UnexpectedEOF;
+            if (n == 0) {
+                return error.UnexpectedEOF;
+            }
             total += n;
         }
 
         return buf;
     }
+};
+
+const ShaderSlot = union(enum) {
+    empty,
+    ready: ShaderInfo,
+};
+
+const TextureSlot = union(enum) {
+    empty,
+    ready: TextureInfo,
 };
 
 const ManifestEntryJson = struct {
@@ -94,8 +105,8 @@ const AssetType = enum {
 
 arena: std.heap.ArenaAllocator,
 assets_pack: AssetsPack,
-shaders_lut: []ShaderInfo,
-textures_lut: []TextureInfo,
+shaders: std.EnumArray(ShaderIndex, ShaderSlot),
+textures: std.EnumArray(TextureIndex, TextureSlot),
 
 const Self = @This();
 
@@ -112,16 +123,15 @@ pub fn init(gpa: Allocator) !Self {
     var self: Self = .{
         .arena = .init(gpa),
         .assets_pack = try AssetsPack.open(assets_pack_path),
-        .shaders_lut = &.{},
-        .textures_lut = &.{},
+        .shaders = std.EnumArray(ShaderIndex, ShaderSlot).initFill(.empty),
+        .textures = std.EnumArray(TextureIndex, TextureSlot).initFill(.empty),
     };
 
-    const allocator = self.arena.allocator();
-    self.shaders_lut = try allocator.alloc(ShaderInfo, enumLen(ShaderIndex));
-    self.textures_lut = try allocator.alloc(TextureInfo, enumLen(TextureIndex));
+    errdefer self.assets_pack.close();
 
-    errdefer self.arena.deinit();
     try self.parseAssetsManifest(assets_path);
+    errdefer self.arena.deinit();
+
     return self;
 }
 
@@ -261,10 +271,6 @@ fn getAssetsPath(gpa: Allocator) ![]const u8 {
     };
 }
 
-fn enumLen(comptime @"enum": type) usize {
-    return @typeInfo(@"enum").@"enum".fields.len;
-}
-
 fn parseAssetsManifest(self: *Self, assets_path: []const u8) !void {
     const gpa = self.arena.allocator();
 
@@ -302,7 +308,7 @@ fn parseAssetsManifest(self: *Self, assets_path: []const u8) !void {
             .shader_dxil,
             => {
                 const idx = try getShaderIndex(name);
-                const shaderinfo = self.getShaderInfo(idx);
+                var shaderinfo = self.getShaderInfo(idx);
 
                 switch (asset_type) {
                     .shader_json => {
@@ -326,7 +332,7 @@ fn parseAssetsManifest(self: *Self, assets_path: []const u8) !void {
 
             .texture_png => {
                 const idx = try getTextureIndex(name);
-                const textureinfo = self.getTextureInfo(idx);
+                var textureinfo = self.getTextureInfo(idx);
 
                 const path = try std.fs.path.join(gpa, &.{ assets_path, name });
                 errdefer gpa.free(path);
@@ -349,12 +355,19 @@ fn getAssetType(fname: []const u8) !AssetType {
         return .texture_png;
     } else {
         log.err("Unexpected asset type {s}", .{fname});
-        return error.AssetType;
+        return error.UnexpectedAssetType;
     }
 }
 
 fn getShaderInfo(self: *Self, idx: ShaderIndex) *ShaderInfo {
-    return &self.shaders_lut[@intFromEnum(idx)];
+    const slot = self.shaders.getPtr(idx);
+    return switch (slot.*) {
+        .ready => |*shaderinfo| shaderinfo,
+        .empty => {
+            slot.* = .{ .ready = std.mem.zeroes(ShaderInfo) };
+            return &slot.ready;
+        },
+    };
 }
 
 fn getShaderIndex(fname: []const u8) !ShaderIndex {
@@ -365,12 +378,19 @@ fn getShaderIndex(fname: []const u8) !ShaderIndex {
         return .solid_color_frag;
     } else {
         log.err("Unexpected shader name {s}", .{fname});
-        return error.ShaderName;
+        return error.UnexpectedShaderName;
     }
 }
 
 fn getTextureInfo(self: *Self, idx: TextureIndex) *TextureInfo {
-    return &self.textures_lut[@intFromEnum(idx)];
+    const slot = self.textures.getPtr(idx);
+    return switch (slot.*) {
+        .ready => |*textureinfo| textureinfo,
+        .empty => {
+            slot.* = .{ .ready = std.mem.zeroes(TextureInfo) };
+            return &slot.ready;
+        },
+    };
 }
 
 fn getTextureIndex(fname: []const u8) !TextureIndex {
@@ -387,6 +407,6 @@ fn getTextureIndex(fname: []const u8) !TextureIndex {
         return .yellow_rect;
     } else {
         log.err("Unexpected texture name {s}", .{fname});
-        return error.ShaderName;
+        return error.UnexpectedTextureName;
     }
 }

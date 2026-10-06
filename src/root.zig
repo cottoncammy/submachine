@@ -38,6 +38,11 @@ const SpriteInstance = extern struct {
     _pad1: [2]f32,
 };
 
+const SpriteUniforms = extern struct {
+    view: [16]f32,
+    proj: [16]f32,
+};
+
 const max_sprites = 10;
 
 pub fn main() !void {
@@ -148,7 +153,7 @@ pub fn main() !void {
         pipeline_desc,
         .blue_rect,
         sampler_desc,
-        @sizeOf(f32) * 32,
+        @sizeOf(SpriteUniforms),
     );
 
     // render state
@@ -273,6 +278,14 @@ fn render(state: *State, gpa: Allocator) !void {
             1,
         );
 
+        const u_view = state.camera.viewMatrix();
+        const u_proj = state.camera.projMatrix();
+
+        const uniforms: SpriteUniforms = .{
+            .view = mat4.flatten(u_view),
+            .proj = mat4.flatten(u_proj),
+        };
+
         for (batches) |batch| {
             var material = try state.gpu_state.getMaterial(batch.material);
             c.SDL_BindGPUGraphicsPipeline(renderpass, material.pipeline);
@@ -286,18 +299,14 @@ fn render(state: *State, gpa: Allocator) !void {
                 1,
             );
 
-            const u_view = state.camera.viewMatrix();
-            material.writeMat4(mat4.flatten(u_view), 0);
-            const u_proj = state.camera.projMatrix();
-            material.writeMat4(mat4.flatten(u_proj), 1);
+            material.writeUniforms(uniforms);
 
             const u_buf = material.uniform_buf;
-            const stride = @sizeOf(f32) * 16;
             c.SDL_PushGPUVertexUniformData(
                 cmdbuf,
                 0,
                 @ptrCast(u_buf.ptr),
-                stride * 2,
+                @sizeOf(SpriteUniforms),
             );
 
             c.SDL_DrawGPUPrimitives(
