@@ -2,8 +2,7 @@ const std = @import("std");
 const log = std.log.scoped(.gpu);
 const Allocator = std.mem.Allocator;
 
-const root = @import("root.zig");
-const c = root.c;
+const c = @import("root.zig").c;
 const AssetsState = @import("AssetsState.zig");
 const ShaderInfo = AssetsState.ShaderInfo;
 const ShaderIndex = AssetsState.ShaderIndex;

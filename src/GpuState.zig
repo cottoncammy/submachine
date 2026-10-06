@@ -1,8 +1,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const root = @import("root.zig");
-const c = root.c;
+const c = @import("root.zig").c;
 const gpu = @import("gpu.zig");
 const hash_map = @import("hash_map.zig");
 const Material = @import("Material.zig");
@@ -40,6 +39,13 @@ pub const SamplerDesc = struct {
     enable_anisotropy: bool,
     enable_compare: bool,
     props: c.SDL_PropertiesID,
+};
+
+pub const MaterialDesc = struct {
+    idx: MaterialIndex,
+    pipeline: PipelineDesc,
+    texture: ?TextureIndex,
+    sampler: ?SamplerDesc,
 };
 
 pub const MaterialIndex = enum {
@@ -230,13 +236,10 @@ pub fn getOrCreateSampler(
 
 pub fn createMaterial(
     self: *Self,
-    idx: MaterialIndex,
-    pipeline: PipelineDesc,
-    opt_texture: ?TextureIndex,
-    opt_sampler: ?SamplerDesc,
-    uniform_buf_len: usize,
+    comptime Uniforms: type,
+    desc: MaterialDesc,
 ) !void {
-    const slot = self.materials.getPtr(idx);
+    const slot = self.materials.getPtr(desc.idx);
 
     switch (slot.*) {
         .ready => return error.MaterialAlreadyCreated,
@@ -245,14 +248,15 @@ pub fn createMaterial(
 
     const gpa = self.arena.allocator();
     var material = std.mem.zeroInit(Material, .{
-        .pipeline = try self.getOrCreatePipeline(pipeline),
-        .uniform_buf = try gpa.alloc(u8, uniform_buf_len),
+        .pipeline = try self.getOrCreatePipeline(desc.pipeline),
+        .uniform_buf = try gpa.alloc(u8, @sizeOf(Uniforms)),
     });
 
-    if (opt_texture) |texture| {
+    if (desc.texture) |texture| {
         material.texture = try self.getOrCreateTexture(texture);
     }
-    if (opt_sampler) |sampler| {
+
+    if (desc.sampler) |sampler| {
         material.sampler = try self.getOrCreateSampler(sampler);
     }
 

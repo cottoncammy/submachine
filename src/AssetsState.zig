@@ -69,9 +69,6 @@ const AssetsPack = struct {
         var total: usize = 0;
         while (total < buf.len) {
             const n = try self.file.pread(buf[total..], offset + total);
-            if (n == 0) {
-                return error.UnexpectedEOF;
-            }
             total += n;
         }
 
@@ -355,7 +352,7 @@ fn getAssetType(fname: []const u8) !AssetType {
         return .texture_png;
     } else {
         log.err("Unexpected asset type {s}", .{fname});
-        return error.UnexpectedAssetType;
+        return error.AssetType;
     }
 }
 
@@ -378,7 +375,7 @@ fn getShaderIndex(fname: []const u8) !ShaderIndex {
         return .solid_color_frag;
     } else {
         log.err("Unexpected shader name {s}", .{fname});
-        return error.UnexpectedShaderName;
+        return error.ShaderName;
     }
 }
 
@@ -407,6 +404,6 @@ fn getTextureIndex(fname: []const u8) !TextureIndex {
         return .yellow_rect;
     } else {
         log.err("Unexpected texture name {s}", .{fname});
-        return error.UnexpectedTextureName;
+        return error.TextureName;
     }
 }
