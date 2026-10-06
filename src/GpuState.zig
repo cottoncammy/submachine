@@ -1,4 +1,5 @@
 const std = @import("std");
+const log = std.log.scoped(.gpu_state);
 const Allocator = std.mem.Allocator;
 
 const c = @import("root.zig").c;
@@ -8,9 +9,6 @@ const Material = @import("Material.zig");
 const AssetsState = @import("AssetsState.zig");
 const ShaderIndex = AssetsState.ShaderIndex;
 const TextureIndex = AssetsState.TextureIndex;
-
-const max_textures_len = 10;
-const max_materials_len = 10;
 
 pub const PipelineDesc = struct {
     vert_shader: ShaderIndex,
@@ -65,8 +63,8 @@ const MaterialSlot = union(enum) {
 const Self = @This();
 
 arena: std.heap.ArenaAllocator,
-assets_state: *AssetsState,
 device: *c.SDL_GPUDevice,
+assets_state: *AssetsState,
 pipelines: std.HashMapUnmanaged(
     PipelineDesc,
     *c.SDL_GPUGraphicsPipeline,
@@ -82,11 +80,11 @@ samplers: std.HashMapUnmanaged(
 ),
 materials: std.EnumArray(MaterialIndex, MaterialSlot),
 
-pub fn init(gpa: Allocator, assets_state: *AssetsState, device: *c.SDL_GPUDevice) !Self {
+pub fn init(gpa: Allocator, device: *c.SDL_GPUDevice, assets_state: *AssetsState) !Self {
     return .{
         .arena = .init(gpa),
-        .assets_state = assets_state,
         .device = device,
+        .assets_state = assets_state,
         .pipelines = .empty,
         .textures = std.EnumArray(TextureIndex, TextureSlot).initFill(.empty),
         .samplers = .empty,
@@ -185,12 +183,16 @@ pub fn getOrCreateTexture(
     const transfer_buf = try gpu.createTransferBuffer(self.device, &transfer_buf_info);
     defer c.SDL_ReleaseGPUTransferBuffer(self.device, transfer_buf);
 
-    const transfer_data: [*]u8 =
-        @ptrCast(c.SDL_MapGPUTransferBuffer(
-            self.device,
-            transfer_buf,
-            false,
-        ));
+    const addr = c.SDL_MapGPUTransferBuffer(
+        self.device,
+        transfer_buf,
+        false,
+    ) orelse {
+        log.err("Failed to map GPU transfer buffer: {s}", .{c.SDL_GetError()});
+        return error.GPUBuffer;
+    };
+
+    const transfer_data: [*]u8 = @ptrCast(@alignCast(addr));
 
     const len: usize = @intCast(width * height * channels);
     @memcpy(transfer_data[0..len], texture_buf[0..len]);
@@ -242,7 +244,7 @@ pub fn createMaterial(
     const slot = self.materials.getPtr(desc.idx);
 
     switch (slot.*) {
-        .ready => return error.MaterialAlreadyCreated,
+        .ready => return error.DuplicateMaterial,
         .empty => {},
     }
 
@@ -267,7 +269,7 @@ pub fn getMaterial(self: *Self, idx: MaterialIndex) !Material {
     const slot = self.materials.getPtr(idx);
     return switch (slot.*) {
         .ready => |material| material,
-        .empty => unreachable,
+        .empty => error.NoMaterial,
     };
 }
 

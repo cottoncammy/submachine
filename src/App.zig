@@ -13,6 +13,8 @@ const Renderer = @import("Renderer.zig");
 const SpriteUniforms = Renderer.SpriteUniforms;
 const Camera = @import("Camera.zig");
 
+const Self = @This();
+
 window: *c.SDL_Window,
 device: *c.SDL_GPUDevice,
 assets: AssetsState,
@@ -20,8 +22,6 @@ gpu: GpuState,
 renderer: Renderer,
 render_state: RenderState,
 camera: Camera,
-
-const Self = @This();
 
 pub fn init(gpa: Allocator) !Self {
     var self: Self = .{
@@ -71,7 +71,7 @@ pub fn init(gpa: Allocator) !Self {
     errdefer self.assets.deinit();
 
     // gpu state
-    self.gpu = try .init(gpa, &self.assets, self.device);
+    self.gpu = try .init(gpa, self.device, &self.assets);
     errdefer self.gpu.deinit();
 
     // renderer
@@ -139,6 +139,7 @@ pub fn init(gpa: Allocator) !Self {
 
 pub fn deinit(self: *Self, gpa: Allocator) void {
     self.render_state.deinit(gpa);
+    self.renderer.deinit();
     self.gpu.deinit();
     self.assets.deinit();
 
@@ -179,6 +180,6 @@ pub fn run(self: *Self, gpa: Allocator) !void {
             },
         });
 
-        try self.renderer.render(gpa, self.render_state, &self.gpu, &self.camera);
+        try self.renderer.render(gpa, &self.render_state, &self.gpu, &self.camera);
     }
 }

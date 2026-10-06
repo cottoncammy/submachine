@@ -8,6 +8,7 @@ const gpu = @import("gpu.zig");
 const mat4 = @import("mat4.zig");
 const Camera = @import("Camera.zig");
 const GpuState = @import("GpuState.zig");
+const Material = @import("Material.zig");
 const RenderState = @import("RenderState.zig");
 
 pub const SpriteInstance = extern struct {
@@ -68,11 +69,12 @@ pub fn deinit(self: *Self) void {
 pub fn render(
     self: *Self,
     gpa: Allocator,
-    render_state: RenderState,
+    render_state: *const RenderState,
     gpu_state: *GpuState,
     camera: *Camera,
 ) !void {
     const cmdbuf = try gpu.acquireCommandBuffer(self.device);
+
     var opt_swapchain: ?*c.SDL_GPUTexture = null;
     if (!c.SDL_WaitAndAcquireGPUSwapchainTexture(cmdbuf, self.window, &opt_swapchain, null, null)) {
         log.err("Failed to acquire swapchain texture: {s}", .{c.SDL_GetError()});
@@ -80,19 +82,26 @@ pub fn render(
     }
 
     if (opt_swapchain) |swapchain| {
-        const transfer_data: [*]SpriteInstance =
-            @ptrCast(@alignCast(c.SDL_MapGPUTransferBuffer(
-                self.device,
-                self.transfer_buf,
-                true,
-            )));
+        const addr = c.SDL_MapGPUTransferBuffer(
+            self.device,
+            self.transfer_buf,
+            true,
+        ) orelse {
+            log.err("Failed to map GPU transfer buffer: {s}", .{c.SDL_GetError()});
+            return error.GPUBuffer;
+        };
+
+        const transfer_data: [*]SpriteInstance = @ptrCast(@alignCast(addr));
         defer c.SDL_UnmapGPUTransferBuffer(self.device, self.transfer_buf);
 
-        // sort draws
         const batches = try render_state.buildBatches(gpa);
         defer gpa.free(batches);
 
         const cmds = render_state.draw_queue.items;
+        if (cmds.len > self.max_sprites) {
+            return error.TooManySprites;
+        }
+
         for (cmds, 0..) |cmd, i| {
             switch (cmd) {
                 .sprite => |sprite| {
@@ -154,38 +163,52 @@ pub fn render(
 
         for (batches) |batch| {
             var material = try gpu_state.getMaterial(batch.material);
-            c.SDL_BindGPUGraphicsPipeline(renderpass, material.pipeline);
-            c.SDL_BindGPUFragmentSamplers(
-                renderpass,
-                0,
-                &.{
-                    .texture = material.texture,
-                    .sampler = material.sampler,
-                },
-                1,
-            );
+            self.bindMaterial(renderpass, &material);
 
             material.writeUniforms(uniforms);
+            self.pushUniforms(cmdbuf, &material);
 
-            const u_buf = material.uniform_buf;
-            c.SDL_PushGPUVertexUniformData(
-                cmdbuf,
-                0,
-                @ptrCast(u_buf.ptr),
-                @sizeOf(SpriteUniforms),
-            );
-
-            c.SDL_DrawGPUPrimitives(
-                renderpass,
-                @intCast(6 * batch.len),
-                1,
-                @intCast(6 * batch.offset),
-                0,
-            );
+            switch (batch.draw_type) {
+                .sprite => c.SDL_DrawGPUPrimitives(
+                    renderpass,
+                    @intCast(6 * batch.len),
+                    1,
+                    @intCast(6 * batch.offset),
+                    0,
+                ),
+            }
         }
 
         c.SDL_EndGPURenderPass(renderpass);
     }
 
     try gpu.submitCommandBuffer(cmdbuf);
+}
+
+fn bindMaterial(
+    _: *const Self,
+    renderpass: ?*c.SDL_GPURenderPass,
+    material: *const Material,
+) void {
+    c.SDL_BindGPUGraphicsPipeline(renderpass, material.pipeline);
+    c.SDL_BindGPUFragmentSamplers(
+        renderpass,
+        0,
+        &.{
+            .texture = material.texture,
+            .sampler = material.sampler,
+        },
+        1,
+    );
+}
+
+fn pushUniforms(_: *const Self, cmdbuf: ?*c.SDL_GPUCommandBuffer, material: *const Material) void {
+    const buf = material.uniform_buf;
+
+    c.SDL_PushGPUVertexUniformData(
+        cmdbuf,
+        0,
+        @ptrCast(buf.ptr),
+        @intCast(buf.len),
+    );
 }

@@ -20,23 +20,8 @@ pub const DrawCommand = union(DrawType) {
     sprite: Sprite,
 };
 
-pub const DrawCommandContext = struct {
-    pub fn lessThan(_: DrawCommandContext, lhs: DrawCommand, rhs: DrawCommand) bool {
-        if (!std.mem.eql(u8, @tagName(lhs), @tagName(rhs))) {
-            return @intFromEnum(lhs) < @intFromEnum(rhs);
-        }
-
-        switch (lhs) {
-            .sprite => |l| switch (rhs) {
-                .sprite => |r| {
-                    return @intFromEnum(l.material) < @intFromEnum(r.material);
-                },
-            },
-        }
-    }
-};
-
 const RenderBatch = struct {
+    draw_type: DrawType,
     material: MaterialIndex,
     offset: usize,
     len: usize,
@@ -69,13 +54,6 @@ pub fn pushDraw(self: *Self, gpa: Allocator, cmd: DrawCommand) !void {
 
 pub fn buildBatches(self: Self, gpa: Allocator) ![]RenderBatch {
     const cmds = self.draw_queue.items;
-    const ctx: DrawCommandContext = .{};
-    std.mem.sort(
-        DrawCommand,
-        cmds,
-        ctx,
-        DrawCommandContext.lessThan,
-    );
 
     var batches: std.ArrayListUnmanaged(RenderBatch) = .empty;
     errdefer batches.deinit(gpa);
@@ -84,16 +62,13 @@ pub fn buildBatches(self: Self, gpa: Allocator) ![]RenderBatch {
     while (i < cmds.len) {
         const key = getBatchKey(cmds[i]);
         var j: usize = i + 1;
-        while (j < cmds.len) {
-            const next = getBatchKey(cmds[j]);
-            if (std.meta.eql(key, next)) {
-                j += 1;
-            } else {
-                break;
-            }
+
+        while (j < cmds.len and std.meta.eql(key, getBatchKey(cmds[j]))) {
+            j += 1;
         }
 
         try batches.append(gpa, .{
+            .draw_type = key.draw_type,
             .material = key.material,
             .offset = i,
             .len = j - i,

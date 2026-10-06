@@ -283,16 +283,14 @@ fn parseAssetsManifest(self: *Self, assets_path: []const u8) !void {
     const json_buf = try reader.interface.allocRemaining(gpa, .limited(max_file_len));
     defer gpa.free(json_buf);
 
-    const parsed = try std.json.parseFromSlice(
+    const parsed = try std.json.parseFromSliceLeaky(
         []ManifestEntryJson,
         gpa,
         json_buf,
         .{},
     );
 
-    defer parsed.deinit();
-
-    for (parsed.value) |entry| {
+    for (parsed) |entry| {
         const name = entry.name;
         const offset = entry.offset;
         const len = entry.len;
