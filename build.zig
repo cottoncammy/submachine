@@ -158,7 +158,12 @@ fn copyAssets(
     arr: *std.ArrayList(std.Build.LazyPath),
 ) !void {
     var cwd = std.fs.cwd();
-    const subdirs = &[_][]const u8{"textures"};
+
+    const subdirs = &[_][]const u8{
+        "textures",
+        "materials",
+    };
+
     for (subdirs) |subdir| {
         const dir_path = b.fmt("assets/{s}", .{subdir});
         var dir = try cwd.openDir(dir_path, .{ .iterate = true });

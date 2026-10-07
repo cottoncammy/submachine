@@ -37,6 +37,26 @@ pub const TextureInfo = struct {
     path: []const u8,
 };
 
+pub const MaterialIndex = enum {
+    blue_rect,
+};
+
+pub const MaterialJson = struct {
+    vertex_shader: []const u8,
+    fragment_shader: []const u8,
+    texture: ?[]const u8 = null,
+    sampler: ?enum {
+        nearest,
+    } = null,
+    blend: ?enum {
+        alpha,
+    } = null,
+};
+
+pub const MaterialInfo = struct {
+    json: MaterialJson,
+};
+
 pub const ShaderJson = struct {
     samplers: c_uint,
     storage_textures: c_uint,
@@ -86,6 +106,11 @@ const TextureSlot = union(enum) {
     ready: TextureInfo,
 };
 
+const MaterialSlot = union(enum) {
+    empty,
+    ready: MaterialInfo,
+};
+
 const ManifestEntryJson = struct {
     name: []const u8,
     offset: ?usize = null,
@@ -97,15 +122,17 @@ const AssetType = enum {
     shader_json,
     shader_spv,
     shader_dxil,
-    texture_png,
+    texture,
+    material,
 };
+
+const Self = @This();
 
 arena: std.heap.ArenaAllocator,
 assets_pack: AssetsPack,
 shaders: std.EnumArray(ShaderIndex, ShaderSlot),
 textures: std.EnumArray(TextureIndex, TextureSlot),
-
-const Self = @This();
+materials: std.EnumArray(MaterialIndex, MaterialSlot),
 
 pub fn init(gpa: Allocator) !Self {
     const assets_path = try getAssetsPath(gpa);
@@ -122,12 +149,13 @@ pub fn init(gpa: Allocator) !Self {
         .assets_pack = try AssetsPack.open(assets_pack_path),
         .shaders = std.EnumArray(ShaderIndex, ShaderSlot).initFill(.empty),
         .textures = std.EnumArray(TextureIndex, TextureSlot).initFill(.empty),
+        .materials = std.EnumArray(MaterialIndex, MaterialSlot).initFill(.empty),
     };
 
     errdefer self.assets_pack.close();
+    errdefer self.arena.deinit();
 
     try self.parseAssetsManifest(assets_path);
-    errdefer self.arena.deinit();
 
     return self;
 }
@@ -184,7 +212,7 @@ pub fn readShaderCode(
 pub fn readShaderJson(
     self: *Self,
     idx: ShaderIndex,
-) !std.json.Parsed(ShaderJson) {
+) !ShaderJson {
     const shaderinfo = self.getShaderInfo(idx);
 
     const offset = shaderinfo.json_offset;
@@ -210,7 +238,7 @@ pub fn readShaderJson(
         return error.LZ4Decompression;
     }
 
-    return try std.json.parseFromSlice(
+    return try std.json.parseFromSliceLeaky(
         ShaderJson,
         gpa,
         buf,
@@ -246,6 +274,47 @@ pub fn readTexture(
         channels,
         0,
     );
+}
+
+pub fn getMaterialInfo(self: *Self, idx: MaterialIndex) *MaterialInfo {
+    const slot = self.materials.getPtr(idx);
+    return switch (slot.*) {
+        .ready => |*materialinfo| materialinfo,
+        .empty => {
+            slot.* = .{ .ready = std.mem.zeroes(MaterialInfo) };
+            return &slot.ready;
+        },
+    };
+}
+
+pub fn getShaderIndex(fname: []const u8) !ShaderIndex {
+    const stem = std.fs.path.stem(fname);
+    if (std.mem.eql(u8, stem, "sprite.vert")) {
+        return .sprite_vert;
+    } else if (std.mem.eql(u8, stem, "solid_color.frag")) {
+        return .solid_color_frag;
+    } else {
+        log.err("Unexpected shader name {s}", .{fname});
+        return error.ShaderName;
+    }
+}
+
+pub fn getTextureIndex(fname: []const u8) !TextureIndex {
+    const stem = std.fs.path.stem(fname);
+    if (std.mem.eql(u8, stem, "blue_rectangle")) {
+        return .blue_rect;
+    } else if (std.mem.eql(u8, stem, "green_rectangle")) {
+        return .green_rect;
+    } else if (std.mem.eql(u8, stem, "purple_rectangle")) {
+        return .purple_rect;
+    } else if (std.mem.eql(u8, stem, "red_rectangle")) {
+        return .red_rect;
+    } else if (std.mem.eql(u8, stem, "yellow_rectangle")) {
+        return .yellow_rect;
+    } else {
+        log.err("Unexpected texture name {s}", .{fname});
+        return error.TextureName;
+    }
 }
 
 fn getAssetsPath(gpa: Allocator) ![]const u8 {
@@ -325,7 +394,7 @@ fn parseAssetsManifest(self: *Self, assets_path: []const u8) !void {
                 }
             },
 
-            .texture_png => {
+            .texture => {
                 const idx = try getTextureIndex(name);
                 var textureinfo = self.getTextureInfo(idx);
 
@@ -333,6 +402,14 @@ fn parseAssetsManifest(self: *Self, assets_path: []const u8) !void {
                 errdefer gpa.free(path);
 
                 textureinfo.path = path;
+            },
+
+            .material => {
+                const idx = try getMaterialIndex(name);
+                var materialinfo = self.getMaterialInfo(idx);
+
+                const json = try self.parseMaterialJson(offset.?, len.?, comp_len.?);
+                materialinfo.json = json;
             },
         }
     }
@@ -347,7 +424,9 @@ fn getAssetType(fname: []const u8) !AssetType {
     } else if (std.mem.eql(u8, ext, ".dxil")) {
         return .shader_dxil;
     } else if (std.mem.eql(u8, ext, ".png")) {
-        return .texture_png;
+        return .texture;
+    } else if (std.mem.eql(u8, ext, ".mat")) {
+        return .material;
     } else {
         log.err("Unexpected asset type {s}", .{fname});
         return error.AssetType;
@@ -365,18 +444,6 @@ fn getShaderInfo(self: *Self, idx: ShaderIndex) *ShaderInfo {
     };
 }
 
-fn getShaderIndex(fname: []const u8) !ShaderIndex {
-    const stem = std.fs.path.stem(fname);
-    if (std.mem.eql(u8, stem, "sprite.vert")) {
-        return .sprite_vert;
-    } else if (std.mem.eql(u8, stem, "solid_color.frag")) {
-        return .solid_color_frag;
-    } else {
-        log.err("Unexpected shader name {s}", .{fname});
-        return error.ShaderName;
-    }
-}
-
 fn getTextureInfo(self: *Self, idx: TextureIndex) *TextureInfo {
     const slot = self.textures.getPtr(idx);
     return switch (slot.*) {
@@ -388,20 +455,44 @@ fn getTextureInfo(self: *Self, idx: TextureIndex) *TextureInfo {
     };
 }
 
-fn getTextureIndex(fname: []const u8) !TextureIndex {
+fn parseMaterialJson(
+    self: *Self,
+    offset: usize,
+    len: usize,
+    comp_len: usize,
+) !MaterialJson {
+    const gpa = self.arena.allocator();
+    const compressed = try self.assets_pack.read(gpa, offset, comp_len);
+    defer gpa.free(compressed);
+
+    const buf = try gpa.allocSentinel(u8, len, 0);
+
+    const result = c.LZ4_decompress_safe(
+        @ptrCast(compressed.ptr),
+        buf.ptr,
+        @intCast(comp_len),
+        @intCast(len),
+    );
+
+    if (result < 0 or result != len) {
+        log.err("Failed to decompress shader json", .{});
+        return error.LZ4Decompression;
+    }
+
+    return try std.json.parseFromSliceLeaky(
+        MaterialJson,
+        gpa,
+        buf,
+        .{},
+    );
+}
+
+fn getMaterialIndex(fname: []const u8) !MaterialIndex {
     const stem = std.fs.path.stem(fname);
-    if (std.mem.eql(u8, stem, "blue_rectangle")) {
+    if (std.mem.eql(u8, stem, "blue_rect")) {
         return .blue_rect;
-    } else if (std.mem.eql(u8, stem, "green_rectangle")) {
-        return .green_rect;
-    } else if (std.mem.eql(u8, stem, "purple_rectangle")) {
-        return .purple_rect;
-    } else if (std.mem.eql(u8, stem, "red_rectangle")) {
-        return .red_rect;
-    } else if (std.mem.eql(u8, stem, "yellow_rectangle")) {
-        return .yellow_rect;
     } else {
-        log.err("Unexpected texture name {s}", .{fname});
-        return error.TextureName;
+        log.err("Unexpected material name {s}", .{fname});
+        return error.MaterialName;
     }
 }

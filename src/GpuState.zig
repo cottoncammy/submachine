@@ -9,6 +9,7 @@ const Material = @import("Material.zig");
 const AssetsState = @import("AssetsState.zig");
 const ShaderIndex = AssetsState.ShaderIndex;
 const TextureIndex = AssetsState.TextureIndex;
+const MaterialIndex = AssetsState.MaterialIndex;
 
 pub const PipelineDesc = struct {
     vert_shader: ShaderIndex,
@@ -46,10 +47,6 @@ pub const MaterialDesc = struct {
     sampler: ?SamplerDesc,
 };
 
-pub const MaterialIndex = enum {
-    blue_rect,
-};
-
 const TextureSlot = union(enum) {
     empty,
     ready: *c.SDL_GPUTexture,
@@ -63,6 +60,7 @@ const MaterialSlot = union(enum) {
 const Self = @This();
 
 arena: std.heap.ArenaAllocator,
+window: *c.SDL_Window,
 device: *c.SDL_GPUDevice,
 assets_state: *AssetsState,
 pipelines: std.HashMapUnmanaged(
@@ -80,9 +78,15 @@ samplers: std.HashMapUnmanaged(
 ),
 materials: std.EnumArray(MaterialIndex, MaterialSlot),
 
-pub fn init(gpa: Allocator, device: *c.SDL_GPUDevice, assets_state: *AssetsState) !Self {
+pub fn init(
+    gpa: Allocator,
+    window: *c.SDL_Window,
+    device: *c.SDL_GPUDevice,
+    assets_state: *AssetsState,
+) !Self {
     return .{
         .arena = .init(gpa),
+        .window = window,
         .device = device,
         .assets_state = assets_state,
         .pipelines = .empty,
@@ -236,7 +240,96 @@ pub fn getOrCreateSampler(
     return result.value_ptr.*;
 }
 
+pub fn getMaterial(self: *Self, idx: MaterialIndex) !Material {
+    const slot = self.materials.getPtr(idx);
+    return switch (slot.*) {
+        .ready => |material| material,
+        .empty => error.NoMaterial,
+    };
+}
+
 pub fn createMaterial(
+    self: *Self,
+    comptime Uniforms: type,
+    idx: MaterialIndex,
+) !void {
+    const info = self.assets_state.getMaterialInfo(idx);
+    const json = info.json;
+
+    var desc = std.mem.zeroInit(MaterialDesc, .{ .idx = idx });
+
+    var pipeline_desc = std.mem.zeroInit(PipelineDesc, .{
+        .vert_shader = try AssetsState.getShaderIndex(json.vertex_shader),
+        .frag_shader = try AssetsState.getShaderIndex(json.fragment_shader),
+    });
+
+    if (json.texture) |texture| {
+        desc.texture = try AssetsState.getTextureIndex(texture);
+    }
+
+    if (json.blend) |blend| switch (blend) {
+        .alpha => {
+            pipeline_desc.target_info = std.mem.zeroInit(
+                c.SDL_GPUGraphicsPipelineTargetInfo,
+                .{
+                    .num_color_targets = 1,
+                    .color_target_descriptions = &[_]c.SDL_GPUColorTargetDescription{
+                        .{
+                            .format = c.SDL_GetGPUSwapchainTextureFormat(self.device, self.window),
+                            .blend_state = .{
+                                .enable_blend = true,
+                                .alpha_blend_op = c.SDL_GPU_BLENDOP_ADD,
+                                .color_blend_op = c.SDL_GPU_BLENDOP_ADD,
+                                .src_color_blendfactor = c.SDL_GPU_BLENDFACTOR_SRC_ALPHA,
+                                .src_alpha_blendfactor = c.SDL_GPU_BLENDFACTOR_SRC_ALPHA,
+                                .dst_color_blendfactor = c.SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA,
+                                .dst_alpha_blendfactor = c.SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA,
+                            },
+                        },
+                    },
+                },
+            );
+        },
+    };
+
+    if (json.sampler) |sampler| switch (sampler) {
+        .nearest => {
+            desc.sampler = std.mem.zeroInit(SamplerDesc, .{
+                .min_filter = c.SDL_GPU_FILTER_NEAREST,
+                .mag_filter = c.SDL_GPU_FILTER_NEAREST,
+                .mipmap_mode = c.SDL_GPU_SAMPLERMIPMAPMODE_NEAREST,
+                .address_mode_u = c.SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE,
+                .address_mode_v = c.SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE,
+                .address_mode_w = c.SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE,
+            });
+        },
+    };
+
+    desc.pipeline = pipeline_desc;
+    try self.createMaterialFromDesc(Uniforms, desc);
+}
+
+fn getPipelineCreateInfo(desc: PipelineDesc) c.SDL_GPUGraphicsPipelineCreateInfo {
+    var createinfo = std.mem.zeroes(c.SDL_GPUGraphicsPipelineCreateInfo);
+    inline for (@typeInfo(@TypeOf(desc)).@"struct".fields) |field| {
+        if (comptime !std.mem.eql(u8, field.name, "vert_shader") and
+            !std.mem.eql(u8, field.name, "frag_shader"))
+        {
+            @field(createinfo, field.name) = @field(desc, field.name);
+        }
+    }
+    return createinfo;
+}
+
+fn getSamplerCreateInfo(desc: SamplerDesc) c.SDL_GPUSamplerCreateInfo {
+    var createinfo = std.mem.zeroes(c.SDL_GPUSamplerCreateInfo);
+    inline for (@typeInfo(@TypeOf(desc)).@"struct".fields) |field| {
+        @field(createinfo, field.name) = @field(desc, field.name);
+    }
+    return createinfo;
+}
+
+fn createMaterialFromDesc(
     self: *Self,
     comptime Uniforms: type,
     desc: MaterialDesc,
@@ -263,32 +356,4 @@ pub fn createMaterial(
     }
 
     slot.* = .{ .ready = material };
-}
-
-pub fn getMaterial(self: *Self, idx: MaterialIndex) !Material {
-    const slot = self.materials.getPtr(idx);
-    return switch (slot.*) {
-        .ready => |material| material,
-        .empty => error.NoMaterial,
-    };
-}
-
-fn getPipelineCreateInfo(desc: PipelineDesc) c.SDL_GPUGraphicsPipelineCreateInfo {
-    var createinfo = std.mem.zeroes(c.SDL_GPUGraphicsPipelineCreateInfo);
-    inline for (@typeInfo(@TypeOf(desc)).@"struct".fields) |field| {
-        if (comptime !std.mem.eql(u8, field.name, "vert_shader") and
-            !std.mem.eql(u8, field.name, "frag_shader"))
-        {
-            @field(createinfo, field.name) = @field(desc, field.name);
-        }
-    }
-    return createinfo;
-}
-
-fn getSamplerCreateInfo(desc: SamplerDesc) c.SDL_GPUSamplerCreateInfo {
-    var createinfo = std.mem.zeroes(c.SDL_GPUSamplerCreateInfo);
-    inline for (@typeInfo(@TypeOf(desc)).@"struct".fields) |field| {
-        @field(createinfo, field.name) = @field(desc, field.name);
-    }
-    return createinfo;
 }

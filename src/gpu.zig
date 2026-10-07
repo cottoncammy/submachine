@@ -17,9 +17,7 @@ pub fn createShader(
     const code = try assets_state.readShaderCode(idx, format);
     defer gpa.free(code);
 
-    const parsed = try assets_state.readShaderJson(idx);
-    defer parsed.deinit();
-    const json = parsed.value;
+    const json = try assets_state.readShaderJson(idx);
 
     const createinfo = std.mem.zeroInit(c.SDL_GPUShaderCreateInfo, .{
         .code_size = code.len,

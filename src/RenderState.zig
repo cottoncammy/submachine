@@ -1,8 +1,8 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const GpuState = @import("GpuState.zig");
-const MaterialIndex = GpuState.MaterialIndex;
+const AssetsState = @import("AssetsState.zig");
+const MaterialIndex = AssetsState.MaterialIndex;
 
 pub const Sprite = struct {
     material: MaterialIndex,

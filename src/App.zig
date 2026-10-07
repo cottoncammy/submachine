@@ -71,7 +71,7 @@ pub fn init(gpa: Allocator) !Self {
     errdefer self.assets.deinit();
 
     // gpu state
-    self.gpu = try .init(gpa, self.device, &self.assets);
+    self.gpu = try .init(gpa, self.window, self.device, &self.assets);
     errdefer self.gpu.deinit();
 
     // renderer
@@ -92,47 +92,8 @@ pub fn init(gpa: Allocator) !Self {
         .right = 100,
     } };
 
-    // pipeline
-    var pipeline_desc = std.mem.zeroInit(PipelineDesc, .{
-        .vert_shader = .sprite_vert,
-        .frag_shader = .solid_color_frag,
-    });
-
-    pipeline_desc.target_info = std.mem.zeroInit(c.SDL_GPUGraphicsPipelineTargetInfo, .{
-        .num_color_targets = 1,
-        .color_target_descriptions = &[_]c.SDL_GPUColorTargetDescription{
-            .{
-                .format = c.SDL_GetGPUSwapchainTextureFormat(self.device, self.window),
-                .blend_state = .{
-                    .enable_blend = true,
-                    .alpha_blend_op = c.SDL_GPU_BLENDOP_ADD,
-                    .color_blend_op = c.SDL_GPU_BLENDOP_ADD,
-                    .src_color_blendfactor = c.SDL_GPU_BLENDFACTOR_SRC_ALPHA,
-                    .src_alpha_blendfactor = c.SDL_GPU_BLENDFACTOR_SRC_ALPHA,
-                    .dst_color_blendfactor = c.SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA,
-                    .dst_alpha_blendfactor = c.SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA,
-                },
-            },
-        },
-    });
-
-    // sampler
-    const sampler_desc = std.mem.zeroInit(SamplerDesc, .{
-        .min_filter = c.SDL_GPU_FILTER_NEAREST,
-        .mag_filter = c.SDL_GPU_FILTER_NEAREST,
-        .mipmap_mode = c.SDL_GPU_SAMPLERMIPMAPMODE_NEAREST,
-        .address_mode_u = c.SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE,
-        .address_mode_v = c.SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE,
-        .address_mode_w = c.SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE,
-    });
-
     // materials
-    try self.gpu.createMaterial(SpriteUniforms, .{
-        .idx = .blue_rect,
-        .pipeline = pipeline_desc,
-        .texture = .blue_rect,
-        .sampler = sampler_desc,
-    });
+    try self.gpu.createMaterial(SpriteUniforms, .blue_rect);
 
     return self;
 }

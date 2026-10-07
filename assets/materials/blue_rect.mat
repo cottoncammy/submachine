@@ -1,0 +1,7 @@
+{
+    "vertex_shader": "sprite.vert.hlsl",
+    "fragment_shader": "solid_color.frag.hlsl",
+    "texture": "blue_rectangle.png",
+    "blend": "alpha",
+    "sampler": "nearest"
+}
