@@ -4,7 +4,11 @@ const Allocator = std.mem.Allocator;
 const AssetsState = @import("AssetsState.zig");
 const MaterialIndex = AssetsState.MaterialIndex;
 
-pub const Sprite = struct {
+const DrawType = enum {
+    sprite,
+};
+
+const Sprite = struct {
     material: MaterialIndex,
     pos: [3]f32,
     rotation: f32,
@@ -12,11 +16,7 @@ pub const Sprite = struct {
     size: [2]f32,
 };
 
-const DrawType = enum {
-    sprite,
-};
-
-pub const DrawCommand = union(DrawType) {
+const DrawCommand = union(DrawType) {
     sprite: Sprite,
 };
 

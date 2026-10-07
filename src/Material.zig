@@ -1,6 +1,7 @@
 const std = @import("std");
 
-const c = @import("root.zig").c;
+const sdl3 = @import("sdl3");
+const c = sdl3.c;
 
 const Self = @This();
 

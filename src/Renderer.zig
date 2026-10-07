@@ -1,9 +1,10 @@
 const std = @import("std");
 const log = std.log.scoped(.render);
-
 const Allocator = std.mem.Allocator;
 
-const c = @import("root.zig").c;
+const sdl3 = @import("sdl3");
+const c = sdl3.c;
+
 const gpu = @import("gpu.zig");
 const mat4 = @import("mat4.zig");
 const Camera = @import("Camera.zig");
@@ -69,52 +70,46 @@ pub fn deinit(self: *Self) void {
 pub fn render(
     self: *Self,
     gpa: Allocator,
+    cmdbuf: ?*c.SDL_GPUCommandBuffer,
+    swapchain: *c.SDL_GPUTexture,
     render_state: *const RenderState,
     gpu_state: *GpuState,
     camera: *Camera,
 ) !void {
-    const cmdbuf = try gpu.acquireCommandBuffer(self.device);
+    const addr = c.SDL_MapGPUTransferBuffer(
+        self.device,
+        self.transfer_buf,
+        true,
+    ) orelse {
+        log.err("Failed to map GPU transfer buffer: {s}", .{c.SDL_GetError()});
+        return error.GPUBuffer;
+    };
 
-    var opt_swapchain: ?*c.SDL_GPUTexture = null;
-    if (!c.SDL_WaitAndAcquireGPUSwapchainTexture(cmdbuf, self.window, &opt_swapchain, null, null)) {
-        log.err("Failed to acquire swapchain texture: {s}", .{c.SDL_GetError()});
-        return error.GPUDevice;
+    const transfer_data: [*]SpriteInstance = @ptrCast(@alignCast(addr));
+    defer c.SDL_UnmapGPUTransferBuffer(self.device, self.transfer_buf);
+
+    const batches = try render_state.buildBatches(gpa);
+    defer gpa.free(batches);
+
+    const cmds = render_state.draw_queue.items;
+    if (cmds.len > self.max_sprites) {
+        return error.TooManySprites;
     }
 
-    if (opt_swapchain) |swapchain| {
-        const addr = c.SDL_MapGPUTransferBuffer(
-            self.device,
-            self.transfer_buf,
-            true,
-        ) orelse {
-            log.err("Failed to map GPU transfer buffer: {s}", .{c.SDL_GetError()});
-            return error.GPUBuffer;
-        };
-
-        const transfer_data: [*]SpriteInstance = @ptrCast(@alignCast(addr));
-        defer c.SDL_UnmapGPUTransferBuffer(self.device, self.transfer_buf);
-
-        const batches = try render_state.buildBatches(gpa);
-        defer gpa.free(batches);
-
-        const cmds = render_state.draw_queue.items;
-        if (cmds.len > self.max_sprites) {
-            return error.TooManySprites;
+    for (cmds, 0..) |cmd, i| {
+        switch (cmd) {
+            .sprite => |sprite| {
+                transfer_data[i] = std.mem.zeroInit(SpriteInstance, .{
+                    .pos = sprite.pos,
+                    .rotation = sprite.rotation,
+                    .color = sprite.color,
+                    .size = sprite.size,
+                });
+            },
         }
+    }
 
-        for (cmds, 0..) |cmd, i| {
-            switch (cmd) {
-                .sprite => |sprite| {
-                    transfer_data[i] = std.mem.zeroInit(SpriteInstance, .{
-                        .pos = sprite.pos,
-                        .rotation = sprite.rotation,
-                        .color = sprite.color,
-                        .size = sprite.size,
-                    });
-                },
-            }
-        }
-
+    if (cmds.len > 0) {
         const copypass = try gpu.beginCopyPass(cmdbuf);
 
         c.SDL_UploadToGPUBuffer(
@@ -132,57 +127,55 @@ pub fn render(
         );
 
         c.SDL_EndGPUCopyPass(copypass);
-
-        const color_target_info = std.mem.zeroInit(c.SDL_GPUColorTargetInfo, .{
-            .texture = swapchain,
-            .clear_color = .{ 0, 0, 0, 1 },
-            .load_op = c.SDL_GPU_LOADOP_CLEAR,
-            .store_op = c.SDL_GPU_STOREOP_STORE,
-        });
-
-        const renderpass = c.SDL_BeginGPURenderPass(cmdbuf, &color_target_info, 1, null);
-        if (renderpass == null) {
-            log.err("Failed to begin render pass: {s}", .{c.SDL_GetError()});
-            return error.GPUDevice;
-        }
-
-        c.SDL_BindGPUVertexStorageBuffers(
-            renderpass,
-            0,
-            &[_]*c.SDL_GPUBuffer{self.storage_buf},
-            1,
-        );
-
-        const u_view = camera.viewMatrix();
-        const u_proj = camera.projMatrix();
-
-        const uniforms: SpriteUniforms = .{
-            .view = mat4.flatten(u_view),
-            .proj = mat4.flatten(u_proj),
-        };
-
-        for (batches) |batch| {
-            var material = try gpu_state.getMaterial(batch.material);
-            self.bindMaterial(renderpass, &material);
-
-            material.writeUniforms(uniforms);
-            self.pushUniforms(cmdbuf, &material);
-
-            switch (batch.draw_type) {
-                .sprite => c.SDL_DrawGPUPrimitives(
-                    renderpass,
-                    @intCast(6 * batch.len),
-                    1,
-                    @intCast(6 * batch.offset),
-                    0,
-                ),
-            }
-        }
-
-        c.SDL_EndGPURenderPass(renderpass);
     }
 
-    try gpu.submitCommandBuffer(cmdbuf);
+    const color_target_info = std.mem.zeroInit(c.SDL_GPUColorTargetInfo, .{
+        .texture = swapchain,
+        .clear_color = .{ 0, 0, 0, 1 },
+        .load_op = c.SDL_GPU_LOADOP_CLEAR,
+        .store_op = c.SDL_GPU_STOREOP_STORE,
+    });
+
+    const renderpass = c.SDL_BeginGPURenderPass(cmdbuf, &color_target_info, 1, null);
+    if (renderpass == null) {
+        log.err("Failed to begin render pass: {s}", .{c.SDL_GetError()});
+        return error.GPUDevice;
+    }
+
+    c.SDL_BindGPUVertexStorageBuffers(
+        renderpass,
+        0,
+        &[_]*c.SDL_GPUBuffer{self.storage_buf},
+        1,
+    );
+
+    const u_view = camera.viewMatrix();
+    const u_proj = camera.projMatrix();
+
+    const uniforms: SpriteUniforms = .{
+        .view = mat4.flatten(u_view),
+        .proj = mat4.flatten(u_proj),
+    };
+
+    for (batches) |batch| {
+        var material = try gpu_state.getMaterial(batch.material);
+        self.bindMaterial(renderpass, &material);
+
+        material.writeUniforms(uniforms);
+        self.pushUniforms(cmdbuf, &material);
+
+        switch (batch.draw_type) {
+            .sprite => c.SDL_DrawGPUPrimitives(
+                renderpass,
+                @intCast(6 * batch.len),
+                1,
+                @intCast(6 * batch.offset),
+                0,
+            ),
+        }
+    }
+
+    c.SDL_EndGPURenderPass(renderpass);
 }
 
 fn bindMaterial(

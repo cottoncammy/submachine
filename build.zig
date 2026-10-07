@@ -46,11 +46,12 @@ pub fn build(b: *std.Build) !void {
     var asset_paths: std.ArrayList(std.Build.LazyPath) = .empty;
     defer asset_paths.deinit(gpa);
 
-    if (b.lazyDependency("sdl", .{
+    if (b.lazyDependency("dvui", .{
         .target = target,
         .optimize = optimize,
     })) |dep| {
-        exe.linkLibrary(dep.artifact("SDL3"));
+        root.addImport("dvui", dep.module("dvui_sdl3gpu"));
+        root.addImport("sdl3", dep.module("sdl3"));
     }
 
     if (b.lazyDependency("lz4", .{

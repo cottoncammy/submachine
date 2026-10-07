@@ -3,7 +3,6 @@ const std = @import("std");
 const App = @import("App.zig");
 
 pub const c = @cImport({
-    @cInclude("SDL3/SDL.h");
     @cInclude("lz4.h");
     @cInclude("stb_image.h");
 });

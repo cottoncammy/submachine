@@ -2,7 +2,9 @@ const std = @import("std");
 const log = std.log.scoped(.gpu);
 const Allocator = std.mem.Allocator;
 
-const c = @import("root.zig").c;
+const sdl3 = @import("sdl3");
+const c = sdl3.c;
+
 const AssetsState = @import("AssetsState.zig");
 const ShaderInfo = AssetsState.ShaderInfo;
 const ShaderIndex = AssetsState.ShaderIndex;
@@ -87,7 +89,7 @@ pub fn createTransferBuffer(
     };
 }
 
-pub fn acquireCommandBuffer(device: *c.SDL_GPUDevice) !?*c.SDL_GPUCommandBuffer {
+pub fn acquireCommandBuffer(device: *c.SDL_GPUDevice) !*c.SDL_GPUCommandBuffer {
     return c.SDL_AcquireGPUCommandBuffer(device) orelse {
         log.err("Failed to acquire command buffer: {s}", .{c.SDL_GetError()});
         return error.GPUDevice;
@@ -101,7 +103,7 @@ pub fn submitCommandBuffer(cmdbuf: ?*c.SDL_GPUCommandBuffer) !void {
     }
 }
 
-pub fn beginCopyPass(cmdbuf: ?*c.SDL_GPUCommandBuffer) !?*c.SDL_GPUCopyPass {
+pub fn beginCopyPass(cmdbuf: ?*c.SDL_GPUCommandBuffer) !*c.SDL_GPUCopyPass {
     return c.SDL_BeginGPUCopyPass(cmdbuf) orelse {
         log.err("Failed to begin copy pass: {s}", .{c.SDL_GetError()});
         return error.GPUDevice;

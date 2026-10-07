@@ -1,8 +1,9 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const log = std.log.scoped(.assets);
-
 const Allocator = std.mem.Allocator;
+
+const sdl3 = @import("sdl3");
 
 const c = @import("root.zig").c;
 
@@ -13,18 +14,6 @@ pub const ShaderIndex = enum(u8) {
     solid_color_frag,
 };
 
-pub const ShaderInfo = struct {
-    json_offset: usize,
-    json_len: usize,
-    json_comp_len: usize,
-    spv_offset: usize,
-    spv_len: usize,
-    spv_comp_len: usize,
-    dxil_offset: usize,
-    dxil_len: usize,
-    dxil_comp_len: usize,
-};
-
 pub const TextureIndex = enum {
     blue_rect,
     green_rect,
@@ -33,35 +22,8 @@ pub const TextureIndex = enum {
     yellow_rect,
 };
 
-pub const TextureInfo = struct {
-    path: []const u8,
-};
-
 pub const MaterialIndex = enum {
     blue_rect,
-};
-
-pub const MaterialJson = struct {
-    vertex_shader: []const u8,
-    fragment_shader: []const u8,
-    texture: ?[]const u8 = null,
-    sampler: ?enum {
-        nearest,
-    } = null,
-    blend: ?enum {
-        alpha,
-    } = null,
-};
-
-pub const MaterialInfo = struct {
-    json: MaterialJson,
-};
-
-pub const ShaderJson = struct {
-    samplers: c_uint,
-    storage_textures: c_uint,
-    storage_buffers: c_uint,
-    uniform_buffers: c_uint,
 };
 
 const AssetsPack = struct {
@@ -109,21 +71,6 @@ const TextureSlot = union(enum) {
 const MaterialSlot = union(enum) {
     empty,
     ready: MaterialInfo,
-};
-
-const ManifestEntryJson = struct {
-    name: []const u8,
-    offset: ?usize = null,
-    len: ?usize = null,
-    comp_len: ?usize = null,
-};
-
-const AssetType = enum {
-    shader_json,
-    shader_spv,
-    shader_dxil,
-    texture,
-    material,
 };
 
 const Self = @This();
@@ -175,11 +122,11 @@ pub fn readShaderCode(
     var offset: usize = 0;
     var len: usize = 0;
     var comp_len: usize = 0;
-    if (format == c.SDL_GPU_SHADERFORMAT_SPIRV) {
+    if (format == sdl3.c.SDL_GPU_SHADERFORMAT_SPIRV) {
         offset = shaderinfo.spv_offset;
         len = shaderinfo.spv_len;
         comp_len = shaderinfo.spv_comp_len;
-    } else if (format == c.SDL_GPU_SHADERFORMAT_DXIL) {
+    } else if (format == sdl3.c.SDL_GPU_SHADERFORMAT_DXIL) {
         offset = shaderinfo.dxil_offset;
         len = shaderinfo.dxil_len;
         comp_len = shaderinfo.dxil_comp_len;
@@ -208,6 +155,13 @@ pub fn readShaderCode(
 
     return buf;
 }
+
+const ShaderJson = struct {
+    samplers: c_uint,
+    storage_textures: c_uint,
+    storage_buffers: c_uint,
+    uniform_buffers: c_uint,
+};
 
 pub fn readShaderJson(
     self: *Self,
@@ -276,6 +230,10 @@ pub fn readTexture(
     );
 }
 
+const MaterialInfo = struct {
+    json: MaterialJson,
+};
+
 pub fn getMaterialInfo(self: *Self, idx: MaterialIndex) *MaterialInfo {
     const slot = self.materials.getPtr(idx);
     return switch (slot.*) {
@@ -336,6 +294,13 @@ fn getAssetsPath(gpa: Allocator) ![]const u8 {
         return err;
     };
 }
+
+const ManifestEntryJson = struct {
+    name: []const u8,
+    offset: ?usize = null,
+    len: ?usize = null,
+    comp_len: ?usize = null,
+};
 
 fn parseAssetsManifest(self: *Self, assets_path: []const u8) !void {
     const gpa = self.arena.allocator();
@@ -415,6 +380,14 @@ fn parseAssetsManifest(self: *Self, assets_path: []const u8) !void {
     }
 }
 
+const AssetType = enum {
+    shader_json,
+    shader_spv,
+    shader_dxil,
+    texture,
+    material,
+};
+
 fn getAssetType(fname: []const u8) !AssetType {
     const ext = std.fs.path.extension(fname);
     if (std.mem.eql(u8, ext, ".json")) {
@@ -433,6 +406,18 @@ fn getAssetType(fname: []const u8) !AssetType {
     }
 }
 
+const ShaderInfo = struct {
+    json_offset: usize,
+    json_len: usize,
+    json_comp_len: usize,
+    spv_offset: usize,
+    spv_len: usize,
+    spv_comp_len: usize,
+    dxil_offset: usize,
+    dxil_len: usize,
+    dxil_comp_len: usize,
+};
+
 fn getShaderInfo(self: *Self, idx: ShaderIndex) *ShaderInfo {
     const slot = self.shaders.getPtr(idx);
     return switch (slot.*) {
@@ -443,6 +428,10 @@ fn getShaderInfo(self: *Self, idx: ShaderIndex) *ShaderInfo {
         },
     };
 }
+
+const TextureInfo = struct {
+    path: []const u8,
+};
 
 fn getTextureInfo(self: *Self, idx: TextureIndex) *TextureInfo {
     const slot = self.textures.getPtr(idx);
@@ -455,6 +444,18 @@ fn getTextureInfo(self: *Self, idx: TextureIndex) *TextureInfo {
     };
 }
 
+const MaterialJson = struct {
+    vertex_shader: []const u8,
+    fragment_shader: []const u8,
+    texture: ?[]const u8 = null,
+    sampler: ?enum {
+        nearest,
+    } = null,
+    blend: ?enum {
+        alpha,
+    } = null,
+};
+
 fn parseMaterialJson(
     self: *Self,
     offset: usize,
@@ -466,6 +467,7 @@ fn parseMaterialJson(
     defer gpa.free(compressed);
 
     const buf = try gpa.allocSentinel(u8, len, 0);
+    errdefer gpa.free(buf);
 
     const result = c.LZ4_decompress_safe(
         @ptrCast(compressed.ptr),
